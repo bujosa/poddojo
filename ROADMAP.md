@@ -1,0 +1,22 @@
+# Roadmap
+
+**Stage:** v0.1, usable end to end. 39 lessons, 155 auto-graded lab steps, 184 quiz questions,
+3 CKAD mock exams (51 tasks), all verified on a real kind cluster (Kubernetes v1.37) with
+`dojo verify`.
+
+## Done
+- Machines: every Docker context (local, ssh://, tcp://), engine probe, per-machine labs.
+- Lab cluster: kind on the chosen machine, own kubeconfig + guard, own Docker network.
+- Learn: concepts with ▶ Run snippets, quizzes with explanations, labs with hints, solutions and
+  checks; resume where you left off; study time, streak.
+- Exams: timed, flags, partial credit, per-domain scores, history, knowledge drill.
+- Explorers: Docker containers/images/layers/volumes/networks, Kubernetes objects by kind.
+- `dojo` CLI on the same progress (status --json for AI tutors), `dojo verify` for content.
+
+## Next
+1. Spaced repetition: resurface quiz questions you missed, on a schedule.
+2. Exam realism: per-task "context" switching between two lab clusters, a vim-only terminal mode.
+3. More mock exams and "speed drills" (one task, a stopwatch, a target time).
+4. Docker track extras: BuildKit secrets and cache mounts, image scanning and SBOMs.
+5. Embedded terminal (PTY) inside the app for `kubectl exec -it`.
+6. Packaging: signed macOS .app bundle and a Linux AppImage.

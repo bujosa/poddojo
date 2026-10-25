@@ -27,6 +27,8 @@ enum Block {
     Rule,
 }
 
+type Cells = Vec<Vec<Span>>;
+
 /// What the reader asked for by clicking inside the Markdown.
 pub enum Action {
     /// Run this shell snippet in the console.
@@ -42,7 +44,7 @@ fn parse(md: &str) -> Vec<Block> {
     let mut pending_bullet: Option<String> = None;
     let mut quote = 0usize;
     let mut code: Option<(String, String)> = None;
-    let mut table: Option<(Vec<Vec<Span>>, Vec<Vec<Vec<Span>>>, bool)> = None;
+    let mut table: Option<(Cells, Vec<Cells>, bool)> = None;
     let mut row: Vec<Vec<Span>> = Vec::new();
 
     let flush = |spans: &mut Vec<Span>,
