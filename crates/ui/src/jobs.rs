@@ -22,7 +22,7 @@ pub enum Done {
     },
     Cluster(Status),
     Console {
-        entry: usize,
+        entry: u64,
         out: CommandOutput,
     },
     Prepared {
@@ -40,12 +40,14 @@ pub enum Done {
         results: Vec<CheckResult>,
     },
     Docker {
+        target: String,
         containers: Result<Vec<Row>, String>,
         images: Result<Vec<Row>, String>,
         volumes: Result<Vec<Row>, String>,
         networks: Result<Vec<Row>, String>,
     },
     Layers {
+        target: String,
         image: String,
         layers: Result<Vec<Layer>, String>,
     },

@@ -151,6 +151,9 @@ pub struct App {
     pub logo: Option<egui::TextureHandle>,
     last_minute: Instant,
     started: bool,
+    /// Modification time of progress.json when we last read or wrote it: the `dojo` CLI may change
+    /// it while the app is open, and the app must build on that instead of overwriting it.
+    progress_stamp: Option<std::time::SystemTime>,
     /// `PODDOJO_SCREENSHOT=<png>`: capture this window after the first jobs settle, then quit
     /// (with `PODDOJO_PAGE=home|learn:<lesson>[:quiz|:lab]|docker|cluster|exams|progress|setup`).
     shot: Option<(std::path::PathBuf, Instant, bool)>,
@@ -164,7 +167,24 @@ impl App {
             Ok(c) => (c, Vec::new()),
             Err(errs) => (Catalog::default(), errs.iter().map(|e| e.to_string()).collect()),
         };
-        let progress = Progress::load(&paths.progress()).unwrap_or_default();
+        let mut startup_toast = None;
+        let progress = match Progress::load(&paths.progress()) {
+            Ok(p) => p,
+            Err(e) => {
+                // Keep the unreadable file instead of overwriting it with an empty history.
+                let backup = paths.root.join(format!("progress.json.unreadable-{}", now()));
+                let kept = std::fs::copy(paths.progress(), &backup).is_ok();
+                startup_toast = Some(format!(
+                    "Your progress file could not be read ({e}). {}",
+                    if kept {
+                        format!("A copy was kept at {}.", backup.display())
+                    } else {
+                        "It was left untouched.".into()
+                    }
+                ));
+                Progress::default()
+            }
+        };
         let t = Tokens::get(settings.dark);
         theme::apply(ctx, &t, settings.zoom);
         let cluster_record = ClusterRecord::load(&paths);
@@ -193,10 +213,15 @@ impl App {
             logo: logo::texture(ctx),
             last_minute: Instant::now(),
             started: false,
+            progress_stamp: None,
             shot: std::env::var_os("PODDOJO_SCREENSHOT").map(|p| (std::path::PathBuf::from(p), Instant::now(), false)),
         };
         if let Ok(page) = std::env::var("PODDOJO_PAGE") {
             app.goto(&page);
+        }
+        app.progress_stamp = progress_mtime(&app.paths);
+        if let Some(t) = startup_toast {
+            app.toast(t, false);
         }
         if app.progress.active_exam.is_some() {
             app.page = Page::Exams;
@@ -218,7 +243,7 @@ impl App {
     /// The environment for work in `id`'s lab folder on the chosen machine.
     pub fn env_for(&self, id: &str) -> Option<LabEnv> {
         let workdir = self.paths.workdir(id);
-        let _ = self.paths.ensure(&workdir);
+        self.paths.ensure(&workdir).ok()?;
         self.target().map(|t| t.env(&self.paths, workdir))
     }
 
@@ -237,6 +262,18 @@ impl App {
     pub fn save_progress(&mut self) {
         if let Err(e) = self.progress.save(&self.paths.progress()) {
             self.toast(format!("Could not save progress: {e}"), false);
+        }
+        self.progress_stamp = progress_mtime(&self.paths);
+    }
+
+    /// Pick up progress written by the CLI (or another window) since we last looked.
+    fn sync_progress(&mut self) {
+        let stamp = progress_mtime(&self.paths);
+        if stamp.is_some() && stamp != self.progress_stamp {
+            if let Ok(p) = Progress::load(&self.paths.progress()) {
+                self.progress = p;
+            }
+            self.progress_stamp = stamp;
         }
     }
 
@@ -364,7 +401,11 @@ impl App {
                     self.learn.results.insert(step, results);
                 }
             }
-            Done::Docker { containers, images, volumes, networks } => {
+            // Results from a machine that is no longer selected are dropped: their names must never
+            // end up next to buttons that act on the new machine.
+            Done::Docker { target, .. } if target != self.target_name() => {}
+            Done::Layers { target, .. } if target != self.target_name() => {}
+            Done::Docker { containers, images, volumes, networks, .. } => {
                 let mut err = None;
                 match containers {
                     Ok(v) => self.docker.containers = v,
@@ -381,7 +422,7 @@ impl App {
                 }
                 self.docker.error = err;
             }
-            Done::Layers { image, layers } => {
+            Done::Layers { image, layers, .. } => {
                 if self.docker.image.as_deref() == Some(image.as_str()) {
                     match layers {
                         Ok(l) => {
@@ -698,6 +739,7 @@ impl App {
             self.started = true;
             self.refresh_targets(&ctx);
         }
+        self.sync_progress();
         for done in self.jobs.poll() {
             self.handle(&ctx, done);
         }
@@ -748,4 +790,8 @@ impl App {
             ctx.request_repaint_after(Duration::from_millis(150));
         }
     }
+}
+
+fn progress_mtime(paths: &Paths) -> Option<std::time::SystemTime> {
+    std::fs::metadata(paths.progress()).and_then(|m| m.modified()).ok()
 }

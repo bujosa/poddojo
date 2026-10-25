@@ -552,7 +552,8 @@ fn cluster_up(c: &Ctx) -> Result<(), String> {
 fn cluster_down(c: &Ctx) -> Result<(), String> {
     let rec = cluster::ClusterRecord::load(&c.paths);
     let all = targets::list(&c.paths)?;
-    let target = targets::choose(&all, rec.as_ref().map_or(&c.settings.target, |r| &r.target)).ok_or("no machine")?;
+    let selected = targets::choose(&all, &c.settings.target).map(|t| t.name).unwrap_or_default();
+    let target = cluster::delete_target(&all, rec.as_ref(), &selected)?;
     let env = target.env(&c.paths, c.paths.root.clone());
     let cmd = cluster::delete_command(&c.paths);
     println!("$ {cmd}");
@@ -594,6 +595,8 @@ fn exam_start(c: &mut Ctx, id: &str) -> Result<(), String> {
     let env = exam_env(c, &e)?;
     cluster::guard(&env)?;
     println!("Preparing the exam environment…");
+    // A retake starts clean: remove whatever the previous attempt left behind.
+    let _ = lab::run_all(&e.cleanup, &env, Duration::from_secs(300));
     let setup: Vec<String> = e.setup.iter().chain(e.tasks.iter().flat_map(|t| &t.setup)).cloned().collect();
     let (ok, log) = lab::run_all(&setup, &env, Duration::from_secs(300));
     if !ok {

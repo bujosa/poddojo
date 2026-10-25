@@ -162,8 +162,14 @@ impl App {
     }
 
     fn delete_cluster(&mut self, ctx: &egui::Context) {
-        let on = self.cluster_record.as_ref().map(|r| r.target.clone()).unwrap_or_else(|| self.settings.target.clone());
-        let Some(target) = poddojo_runner::targets::choose(&self.targets, &on) else { return };
+        let selected = self.target_name();
+        let target = match cluster::delete_target(&self.targets, self.cluster_record.as_ref(), &selected) {
+            Ok(t) => t.clone(),
+            Err(e) => {
+                self.toast(e, false);
+                return;
+            }
+        };
         let env = target.env(&self.paths, self.paths.root.clone());
         let cmd = cluster::delete_command(&self.paths);
         self.jobs.spawn(ctx, "cluster change", move |live| {

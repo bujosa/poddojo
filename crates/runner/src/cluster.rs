@@ -202,6 +202,19 @@ pub fn parse_nodes(json: &str) -> Vec<Node> {
         .collect()
 }
 
+/// The machine to delete the lab cluster from: exactly the one it was created on. If that machine
+/// is no longer a Docker context, refuse rather than deleting some other machine's `poddojo`.
+pub fn delete_target<'a>(
+    targets: &'a [Target],
+    record: Option<&ClusterRecord>,
+    selected: &str,
+) -> Result<&'a Target, String> {
+    let want = record.map_or(selected, |r| r.target.as_str());
+    targets.iter().find(|t| t.name == want).ok_or_else(|| {
+        format!("the lab cluster was created on `{want}`, which is not a Docker context any more: refusing to delete anything")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

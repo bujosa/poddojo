@@ -17,8 +17,10 @@ impl App {
             return;
         }
         let Some(env) = self.env_for("playground") else { return };
-        self.docker.loaded_for = Some(self.target_name());
+        let target = self.target_name();
+        self.docker.loaded_for = Some(target.clone());
         self.jobs.spawn(ctx, "docker list", move |_| Done::Docker {
+            target,
             containers: explore::containers(&env),
             images: explore::images(&env),
             volumes: explore::volumes(&env),
@@ -31,7 +33,12 @@ impl App {
         self.docker.image = Some(image.clone());
         self.docker.layers.clear();
         self.docker.layers_error = None;
-        self.jobs.spawn(ctx, "docker layers", move |_| Done::Layers { layers: explore::history(&env, &image), image });
+        let target = self.target_name();
+        self.jobs.spawn(ctx, "docker layers", move |_| Done::Layers {
+            target,
+            layers: explore::history(&env, &image),
+            image,
+        });
     }
 
     pub fn docker_page(&mut self, ui: &mut egui::Ui) {

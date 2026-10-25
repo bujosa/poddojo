@@ -110,7 +110,7 @@ impl Progress {
         }
         let text =
             serde_json::to_string_pretty(self).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let tmp = path.with_extension("json.tmp");
+        let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
         std::fs::write(&tmp, text)?;
         std::fs::rename(&tmp, path)
     }
@@ -153,11 +153,11 @@ impl Progress {
     }
 
     pub fn record_step(&mut self, lesson: &Lesson, step: usize, passed: bool, now: i64) {
-        let e = self.entry(&lesson.id);
+        self.entry(&lesson.id);
+        // A pass is kept until the lab is reset: later steps often undo an earlier step's state on
+        // purpose (remove the container you created), so re-checking must not take credit away.
         if passed {
-            e.steps.insert(step);
-        } else {
-            e.steps.remove(&step);
+            self.entry(&lesson.id).steps.insert(step);
         }
         self.touch_day();
         self.refresh_completion(lesson, now);
@@ -339,6 +339,8 @@ mod tests {
         assert!(!p.is_done(&l));
         p.record_step(&l, 1, true, 4);
         assert!(p.is_done(&l));
+        p.record_step(&l, 0, false, 5);
+        assert!(p.is_done(&l), "a later failed re-check keeps an earned pass");
         assert_eq!(p.lesson("a").unwrap().completed_at, Some(4));
         p.reset_lab(&l);
         assert!(!p.is_done(&l));

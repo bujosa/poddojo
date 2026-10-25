@@ -64,6 +64,10 @@ pub fn prepare(lesson: &Lesson, env: &LabEnv) -> (bool, String) {
 /// Run the lab's cleanup commands (errors are reported, not fatal).
 pub fn reset(lesson: &Lesson, env: &LabEnv) -> String {
     let Some(lab) = &lesson.lab else { return String::new() };
+    // Cleanup deletes things: check the lab cluster is really PodDojo's before touching it.
+    if let Err(e) = preflight(lesson.needs, env) {
+        return format!("✗ refusing to clean up: {e}\n");
+    }
     let mut log = String::new();
     for cmd in &lab.cleanup {
         log.push_str(&format!("$ {cmd}\n"));

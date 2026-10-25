@@ -105,9 +105,15 @@ pub fn run_live(cmd: &str, env: &LabEnv, timeout: Duration, live: Option<Arc<Mut
     for (k, v) in env.vars() {
         command.env(k, v);
     }
-    if env.workdir.is_dir() {
-        command.current_dir(&env.workdir);
+    // Always run in the lab folder: never fall back to the app's own working directory, where a
+    // relative cleanup such as `rm -f app/Dockerfile` would touch the wrong files.
+    if let Err(e) = std::fs::create_dir_all(&env.workdir) {
+        return CommandOutput::failed_to_start(format!(
+            "could not create the lab folder {}: {e}",
+            env.workdir.display()
+        ));
     }
+    command.current_dir(&env.workdir);
     command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(unix)]
     {
@@ -118,8 +124,10 @@ pub fn run_live(cmd: &str, env: &LabEnv, timeout: Duration, live: Option<Arc<Mut
         Ok(c) => c,
         Err(e) => return CommandOutput::failed_to_start(format!("could not start /bin/sh: {e}")),
     };
-    let out = child.stdout.take().map(|s| reader(s, live.clone()));
-    let err = child.stderr.take().map(|s| reader(s, live));
+    let out_buf = Arc::new(Mutex::new(Vec::new()));
+    let err_buf = Arc::new(Mutex::new(Vec::new()));
+    let out = child.stdout.take().map(|s| reader(s, out_buf.clone(), live.clone()));
+    let err = child.stderr.take().map(|s| reader(s, err_buf.clone(), live));
     let start = Instant::now();
     let mut timed_out = false;
     let status = loop {
@@ -136,22 +144,37 @@ pub fn run_live(cmd: &str, env: &LabEnv, timeout: Duration, live: Option<Arc<Mut
             Err(e) => return CommandOutput::failed_to_start(e),
         }
     };
-    let stdout = out.and_then(|h| h.join().ok()).unwrap_or_default();
-    let stderr = err.and_then(|h| h.join().ok()).unwrap_or_default();
-    CommandOutput { status, stdout, stderr, timed_out }
+    // A background child (`cmd &`) can outlive the shell and keep the pipes open. Give the readers
+    // a short grace period, then kill the whole process group instead of waiting forever.
+    let grace = Instant::now()
+        + Duration::from_secs(3).min(timeout.saturating_sub(start.elapsed()).max(Duration::from_millis(200)));
+    let finished = |h: &Option<std::thread::JoinHandle<()>>| h.as_ref().is_none_or(|h| h.is_finished());
+    while !(finished(&out) && finished(&err)) && Instant::now() < grace {
+        std::thread::sleep(Duration::from_millis(15));
+    }
+    if !(finished(&out) && finished(&err)) {
+        kill_group(child.id());
+    }
+    let take = |b: &Arc<Mutex<Vec<u8>>>| b.lock().map(|v| String::from_utf8_lossy(&v).into_owned()).unwrap_or_default();
+    CommandOutput { status, stdout: take(&out_buf), stderr: take(&err_buf), timed_out }
 }
 
-fn reader(mut stream: impl Read + Send + 'static, live: Option<Arc<Mutex<String>>>) -> std::thread::JoinHandle<String> {
+fn reader(
+    mut stream: impl Read + Send + 'static,
+    all: Arc<Mutex<Vec<u8>>>,
+    live: Option<Arc<Mutex<String>>>,
+) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
-        let mut all = Vec::new();
         let mut buf = [0u8; 8192];
         loop {
             match stream.read(&mut buf) {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
                     let chunk = buf.get(..n).unwrap_or_default();
-                    if all.len() < MAX_OUTPUT {
-                        all.extend_from_slice(chunk);
+                    if let Ok(mut a) = all.lock()
+                        && a.len() < MAX_OUTPUT
+                    {
+                        a.extend_from_slice(chunk);
                     }
                     if let Some(live) = &live
                         && let Ok(mut l) = live.lock()
@@ -162,7 +185,6 @@ fn reader(mut stream: impl Read + Send + 'static, live: Option<Arc<Mutex<String>
                 }
             }
         }
-        String::from_utf8_lossy(&all).into_owned()
     })
 }
 
@@ -208,6 +230,23 @@ mod tests {
         let out = run("sleep 5 & sleep 5; echo done", &env(), Duration::from_millis(300));
         assert!(out.timed_out);
         assert!(t.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn background_children_do_not_hang_the_runner() {
+        let t = Instant::now();
+        let out = run("sleep 30 & echo started", &env(), Duration::from_secs(20));
+        assert_eq!(out.stdout.trim(), "started");
+        assert!(t.elapsed() < Duration::from_secs(6));
+    }
+
+    #[test]
+    fn missing_lab_folder_is_created_not_skipped() {
+        let dir = std::env::temp_dir().join(format!("poddojo-exec-{}", std::process::id()));
+        let e = LabEnv { workdir: dir.clone(), ..env() };
+        let out = run("pwd", &e, Duration::from_secs(5));
+        assert!(out.stdout.trim().ends_with(&format!("poddojo-exec-{}", std::process::id())));
+        std::fs::remove_dir_all(dir).ok();
     }
 
     #[test]

@@ -9,6 +9,9 @@ use crate::jobs::Jobs;
 use crate::theme::Tokens;
 
 pub struct Entry {
+    /// Stable id: completions find their entry by id, never by position (Clear and the 200-entry
+    /// cap shift positions while commands are still running).
+    pub id: u64,
     pub cmd: String,
     pub output: String,
     pub status: Option<i32>,
@@ -23,32 +26,38 @@ pub struct Console {
     pub input: String,
     history_pos: Option<usize>,
     stick_to_bottom: bool,
+    next_id: u64,
 }
 
 impl Console {
-    pub fn push(&mut self, cmd: &str) -> usize {
+    pub fn push(&mut self, cmd: &str) -> u64 {
+        self.next_id += 1;
+        let id = self.next_id;
         self.entries.push(Entry {
+            id,
             cmd: cmd.to_string(),
             output: String::new(),
             status: None,
             running: true,
             job: None,
         });
-        if self.entries.len() > 200 {
-            self.entries.remove(0);
+        if self.entries.len() > 200
+            && let Some(pos) = self.entries.iter().position(|e| !e.running)
+        {
+            self.entries.remove(pos);
         }
         self.stick_to_bottom = true;
-        self.entries.len() - 1
+        id
     }
 
-    pub fn set_job(&mut self, entry: usize, job: u64) {
-        if let Some(e) = self.entries.get_mut(entry) {
+    pub fn set_job(&mut self, entry: u64, job: u64) {
+        if let Some(e) = self.entries.iter_mut().find(|e| e.id == entry) {
             e.job = Some(job);
         }
     }
 
-    pub fn finish(&mut self, entry: usize, out: CommandOutput) {
-        if let Some(e) = self.entries.get_mut(entry) {
+    pub fn finish(&mut self, entry: u64, out: CommandOutput) {
+        if let Some(e) = self.entries.iter_mut().find(|e| e.id == entry) {
             e.running = false;
             e.status = out.status;
             e.output = out.combined();

@@ -28,6 +28,9 @@ pub struct Target {
     pub current: bool,
     pub kind: Kind,
     pub error: String,
+    /// The machine's address, resolved once when contexts are listed (on a background thread),
+    /// so building a lab environment never blocks on `ssh -G`.
+    pub resolved: String,
 }
 
 #[derive(Deserialize)]
@@ -74,6 +77,7 @@ impl Target {
             current: r.current,
             kind,
             error: r.error,
+            resolved: String::new(),
         }
     }
 
@@ -90,20 +94,30 @@ impl Target {
         (!host.is_empty()).then(|| host.to_string())
     }
 
-    /// The address that reaches ports published on this machine. SSH aliases (`ssh://pi`) are
-    /// resolved with `ssh -G`.
+    /// The address that reaches ports published on this machine: the address resolved by [`list`]
+    /// (SSH aliases such as `ssh://pi` go through `ssh -G`), else the endpoint's host.
     pub fn address(&self) -> String {
+        if !self.resolved.is_empty() {
+            return self.resolved.clone();
+        }
         match self.kind {
             Kind::Local => "127.0.0.1".to_string(),
-            Kind::Tcp => self.endpoint_host().unwrap_or_else(|| "127.0.0.1".into()),
-            Kind::Ssh => {
-                let Some(host) = self.endpoint_host() else { return "127.0.0.1".into() };
-                if host.parse::<std::net::IpAddr>().is_ok() {
-                    return host;
-                }
-                resolve_ssh_alias(&host).unwrap_or(host)
-            }
+            Kind::Tcp | Kind::Ssh => self.endpoint_host().unwrap_or_else(|| "127.0.0.1".into()),
         }
+    }
+
+    /// Resolve [`Self::address`] now (may run `ssh -G`, bounded by a timeout).
+    pub fn resolve(&mut self, paths: &Paths) {
+        self.resolved = match self.kind {
+            Kind::Ssh => match self.endpoint_host() {
+                Some(host) if host.parse::<std::net::IpAddr>().is_err() => {
+                    resolve_ssh_alias(&host, paths).unwrap_or(host)
+                }
+                Some(host) => host,
+                None => "127.0.0.1".into(),
+            },
+            _ => self.address(),
+        };
     }
 
     /// The lab environment for this machine with `workdir` as the working folder.
@@ -122,9 +136,12 @@ impl Target {
     }
 }
 
-fn resolve_ssh_alias(alias: &str) -> Option<String> {
-    let out = std::process::Command::new("ssh").args(["-G", alias]).output().ok()?;
-    let text = String::from_utf8_lossy(&out.stdout);
+fn resolve_ssh_alias(alias: &str, paths: &Paths) -> Option<String> {
+    let out = run(&format!("ssh -G {}", crate::exec::shell_quote(alias)), &bare_env(paths), Duration::from_secs(5));
+    if !out.success() {
+        return None;
+    }
+    let text = out.stdout;
     text.lines().find_map(|l| l.strip_prefix("hostname ")).map(|h| h.trim().to_string()).filter(|h| !h.is_empty())
 }
 
@@ -149,7 +166,11 @@ pub fn list(paths: &Paths) -> Result<Vec<Target>, String> {
             format!("docker context ls failed: {}", out.combined())
         });
     }
-    Ok(parse_contexts(&out.stdout))
+    let mut targets = parse_contexts(&out.stdout);
+    for t in &mut targets {
+        t.resolve(paths);
+    }
+    Ok(targets)
 }
 
 pub fn parse_contexts(text: &str) -> Vec<Target> {
@@ -213,6 +234,7 @@ mod tests {
         assert_eq!(t.len(), 4);
         assert_eq!(t[0].kind, Kind::Ssh);
         assert_eq!(t[0].address(), "10.0.0.14");
+        assert_eq!(t[2].address(), "pi");
         assert_eq!(t[1].kind, Kind::Local);
         assert_eq!(t[1].address(), "127.0.0.1");
         assert_eq!(t[2].endpoint_host().as_deref(), Some("pi"));

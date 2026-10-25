@@ -234,6 +234,38 @@ fn plain(spans: &[Span]) -> String {
     spans.iter().map(|s| s.text.as_str()).collect()
 }
 
+/// Whether a snippet may get a ▶ Run button. Lessons also show illustrative commands with
+/// everyday names (`docker rm -f web`); running those could remove the learner's own containers.
+/// Anything that deletes or stops must name PodDojo's resources (`dojo-…`, a `…-lab`/`mock…`
+/// namespace) and pass the content safety rules; otherwise the snippet is Copy-only.
+pub fn runnable(text: &str) -> bool {
+    const DESTRUCTIVE: &[&str] = &[
+        "docker rm",
+        "docker rmi",
+        "docker container rm",
+        "docker image rm",
+        "docker volume rm",
+        "docker network rm",
+        "docker stop",
+        "docker kill",
+        "docker container stop",
+        "compose down",
+        "kubectl delete",
+        "helm uninstall",
+        "helm delete",
+        "kind delete",
+        "rm -",
+    ];
+    text.lines().all(|line| {
+        let flat = line.split_whitespace().collect::<Vec<_>>().join(" ");
+        if poddojo_core::check::unsafe_command(&flat).is_some() {
+            return false;
+        }
+        let destructive = DESTRUCTIVE.iter().any(|d| flat.contains(d));
+        !destructive || flat.contains("dojo") || flat.contains("-lab") || flat.contains("mock")
+    })
+}
+
 pub fn is_shell(lang: &str) -> bool {
     matches!(lang, "bash" | "sh" | "shell" | "console" | "zsh")
 }
@@ -341,12 +373,15 @@ pub fn code_block(ui: &mut egui::Ui, t: &Tokens, lang: &str, text: &str, id: &st
                         ui.ctx().copy_text(text.to_string());
                     }
                     if is_shell(lang)
+                        && runnable(text)
                         && ui
                             .small_button("▶ Run")
                             .on_hover_text("Run in the console, on your chosen machine")
                             .clicked()
                     {
-                        action = Some(Action::Run(text.to_string()));
+                        let script =
+                            if text.trim().contains('\n') { format!("set -e\n{text}") } else { text.to_string() };
+                        action = Some(Action::Run(script));
                     }
                 });
             });
@@ -372,6 +407,15 @@ mod tests {
         assert!(matches!(&b[4], Block::Code { lang, text } if lang == "bash" && text == "echo hi"));
         assert!(matches!(&b[5], Block::Table { rows, .. } if rows.len() == 1));
         assert!(matches!(&b[6], Block::Para { quote: true, .. }));
+    }
+
+    #[test]
+    fn only_dojo_scoped_snippets_are_runnable() {
+        assert!(!runnable("docker run -d --name web nginx\ndocker rm -f web"));
+        assert!(runnable("docker rm -f dojo-web"));
+        assert!(runnable("kubectl -n cm-lab delete pod x"));
+        assert!(runnable("docker ps -a"));
+        assert!(!runnable("docker system prune -af"));
     }
 
     #[test]
