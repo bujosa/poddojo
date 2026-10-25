@@ -11,6 +11,22 @@ use crate::settings::{CLUSTER_NAME, Settings};
 use crate::targets::Target;
 
 pub const CONTEXT: &str = "kind-poddojo";
+/// PodDojo's own Docker network for the cluster nodes (kind would otherwise share `kind`).
+pub const NETWORK: &str = "dojo-kind";
+
+/// Create [`NETWORK`] if missing. Docker's automatic address pools run out on machines with many
+/// networks ("all predefined address pools have been fully subnetted"), so fall back to explicit,
+/// rarely used subnets instead of asking the learner to prune anything.
+pub fn ensure_network_command() -> String {
+    let candidates = ["10.213.7.0/24", "10.219.7.0/24", "10.227.7.0/24", "10.241.7.0/24", "172.40.7.0/24", "192.168.247.0/24"];
+    let opts = "--label poddojo=1 -o com.docker.network.bridge.enable_ip_masquerade=true";
+    let mut s = format!("docker network inspect {NETWORK} >/dev/null 2>&1 || docker network create {opts} {NETWORK} >/dev/null 2>&1");
+    for c in candidates {
+        s.push_str(&format!(" || docker network create {opts} --subnet {c} {NETWORK} >/dev/null 2>&1"));
+    }
+    s.push_str(&format!(" || {{ echo 'could not create the {NETWORK} Docker network' >&2; false; }}"));
+    s
+}
 
 /// Which machine the lab cluster was created on.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,14 +114,18 @@ pub fn create_command(paths: &Paths, settings: &Settings, target: &Target) -> st
     let config = paths.root.join("kind-config.yaml");
     std::fs::write(&config, kind_config(settings, target))?;
     Ok(format!(
-        "kind create cluster --name {CLUSTER_NAME} --config {} --kubeconfig {} --wait 180s",
+        "{} && KIND_EXPERIMENTAL_DOCKER_NETWORK={NETWORK} kind create cluster --name {CLUSTER_NAME} --config {} --kubeconfig {} --wait 180s",
+        ensure_network_command(),
         shell_quote(&config.display().to_string()),
         shell_quote(&paths.kubeconfig().display().to_string())
     ))
 }
 
 pub fn delete_command(paths: &Paths) -> String {
-    format!("kind delete cluster --name {CLUSTER_NAME} --kubeconfig {}", shell_quote(&paths.kubeconfig().display().to_string()))
+    format!(
+        "kind delete cluster --name {CLUSTER_NAME} --kubeconfig {} && (docker network rm {NETWORK} >/dev/null 2>&1 || true)",
+        shell_quote(&paths.kubeconfig().display().to_string())
+    )
 }
 
 /// Refuse to go on unless PodDojo's kubeconfig holds only the lab cluster's context.
