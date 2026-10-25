@@ -43,44 +43,85 @@ impl App {
                 ui.add_space(8.0);
             }
             for e in self.catalog.exams.clone() {
-                theme::card(&t).show(ui, |ui| {
+                theme::card(&t).inner_margin(egui::Margin::same(20)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(&e.title).size(18.0).strong());
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let busy = self.jobs.busy("exam");
-                            if ui.add_enabled(self.cluster_running() && !busy, egui::Button::new(RichText::new("▶ Start").strong())).clicked() {
-                                self.start_exam(&ctx, &e);
+                    let best = self.progress.best_attempt(&e.id).cloned();
+                    ui.horizontal_top(|ui| {
+                        ui.allocate_ui_with_layout(
+                            egui::vec2((ui.available_width() - 150.0).max(240.0), 0.0),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                ui.set_min_width(ui.available_width());
+                                ui.label(RichText::new(&e.title).size(19.0).strong().color(strong(&t)));
+                                ui.label(
+                                    RichText::new(format!("{} tasks · {} minutes · {}% to pass", e.tasks.len(), e.minutes, e.pass_percent))
+                                        .color(t.muted),
+                                );
+                                ui.add_space(6.0);
+                                if !e.summary.is_empty() {
+                                    ui.label(&e.summary);
+                                }
+                                ui.add_space(8.0);
+                                let mut weights: BTreeMap<&str, u32> = BTreeMap::new();
+                                for task in &e.tasks {
+                                    *weights.entry(task.domain.as_str()).or_default() += task.weight;
+                                }
+                                ui.horizontal_wrapped(|ui| {
+                                    for d in poddojo_core::DOMAINS {
+                                        if let Some(w) = weights.get(d.id) {
+                                            theme::chip(ui, &format!("{} · {w}%", short_domain(d.id)), t.muted, t.card_hover);
+                                        }
+                                    }
+                                });
+                                let attempts: Vec<&ExamAttempt> = self.progress.exams.iter().filter(|a| a.exam_id == e.id).collect();
+                                if !attempts.is_empty() {
+                                    ui.add_space(4.0);
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.label(RichText::new("Attempts").size(12.5).color(t.muted));
+                                        for a in attempts.iter().rev().take(6) {
+                                            let resp = ui.add(
+                                                egui::Label::new(
+                                                    RichText::new(format!("{:.0}% · {}", a.percent, ago(a.finished_at)))
+                                                        .size(12.5)
+                                                        .color(if a.passed { t.good } else { t.amber }),
+                                                )
+                                                .sense(egui::Sense::click()),
+                                            );
+                                            if resp.on_hover_text("Review this attempt").clicked() {
+                                                self.exam.result = Some((*a).clone());
+                                            }
+                                        }
+                                    });
+                                }
+                            },
+                        );
+                        ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                            match &best {
+                                Some(a) => theme::ring(
+                                    ui,
+                                    &t,
+                                    a.percent / 100.0,
+                                    104.0,
+                                    &format!("{:.0}%", a.percent),
+                                    "best",
+                                    if a.passed { t.good } else { t.amber },
+                                ),
+                                None => theme::ring(ui, &t, 0.0, 104.0, "–", "not taken", t.muted),
                             }
+                            ui.add_space(6.0);
+                            let busy = self.jobs.busy("exam");
+                            ui.add_enabled_ui(self.cluster_running() && !busy, |ui| {
+                                if accent_button(ui, &t, if best.is_some() { "Retake" } else { "Start exam" }).clicked() {
+                                    self.start_exam(&ctx, &e);
+                                }
+                            });
                             if busy {
                                 ui.spinner();
                             }
                         });
                     });
-                    ui.label(RichText::new(format!("{} tasks · {} minutes · pass {}%", e.tasks.len(), e.minutes, e.pass_percent)).color(t.muted));
-                    if !e.summary.is_empty() {
-                        ui.label(&e.summary);
-                    }
-                    let mut weights: BTreeMap<&str, u32> = BTreeMap::new();
-                    for task in &e.tasks {
-                        *weights.entry(task.domain.as_str()).or_default() += task.weight;
-                    }
-                    ui.horizontal_wrapped(|ui| {
-                        for (d, w) in weights {
-                            theme::chip(ui, &format!("{} {w}%", domain_title(d)), t.muted, t.card_hover);
-                        }
-                    });
-                    let attempts: Vec<&ExamAttempt> = self.progress.exams.iter().filter(|a| a.exam_id == e.id).collect();
-                    if !attempts.is_empty() {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label(RichText::new("Attempts:").small().color(t.muted));
-                            for a in attempts.iter().rev().take(6) {
-                                ui.label(RichText::new(format!("{:.0}% ({})", a.percent, ago(a.finished_at))).small().color(if a.passed { t.good } else { t.amber }));
-                            }
-                        });
-                    }
                 });
-                ui.add_space(8.0);
+                ui.add_space(10.0);
             }
             if !self.exam.log.is_empty() {
                 egui::CollapsingHeader::new("Last exam log").show(ui, |ui| {
@@ -534,4 +575,15 @@ fn task_row(
         );
     }
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+fn short_domain(id: &str) -> &'static str {
+    match id {
+        "design-build" => "Design & Build",
+        "deployment" => "Deployment",
+        "observability" => "Observability",
+        "config-security" => "Config & Security",
+        "networking" => "Networking",
+        _ => "Other",
+    }
 }

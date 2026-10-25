@@ -283,7 +283,7 @@ impl App {
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if let Some((tab, label)) = next
-                        && accent_button(ui, t, &format!("{label}")).clicked()
+                        && accent_button(ui, t, label).clicked()
                     {
                         if !read {
                             self.progress.mark_read(l, now());
@@ -702,7 +702,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
             if let Some((id, title)) = prev
-                && ui.button(format!("{title}")).on_hover_text("Previous lesson").clicked()
+                && ui.button(format!("Previous: {title}")).on_hover_text("Previous lesson").clicked()
             {
                 self.open_lesson(&id);
             }
@@ -711,7 +711,7 @@ impl App {
                     let clicked = if self.progress.is_done(l) {
                         accent_button(ui, t, &format!("Next: {title}")).clicked()
                     } else {
-                        ui.button(format!("{title}")).on_hover_text("Next lesson").clicked()
+                        ui.button(format!("Next: {title}")).on_hover_text("Next lesson").clicked()
                     };
                     if clicked {
                         self.open_lesson(&id);

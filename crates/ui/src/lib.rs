@@ -163,6 +163,8 @@ pub struct App {
     /// it while the app is open, and the app must build on that instead of overwriting it.
     progress_stamp: Option<std::time::SystemTime>,
     demo_ran: bool,
+    /// Machines were tested since the Setup page was opened.
+    pub setup_probed: bool,
     /// `PODDOJO_SCREENSHOT=<png>`: capture this window after the first jobs settle, then quit
     /// (with `PODDOJO_PAGE=home|learn:<lesson>[:quiz|:lab]|docker|cluster|exams|progress|setup`).
     shot: Option<(std::path::PathBuf, Instant, bool)>,
@@ -225,6 +227,7 @@ impl App {
             started: false,
             progress_stamp: None,
             demo_ran: false,
+            setup_probed: false,
             shot: std::env::var_os("PODDOJO_SCREENSHOT").map(|p| (std::path::PathBuf::from(p), Instant::now(), false)),
         };
         if let Ok(page) = std::env::var("PODDOJO_PAGE") {
@@ -734,9 +737,7 @@ impl App {
         };
         let mut pick = None;
         egui::ComboBox::from_id_salt("machine")
-            .selected_text(
-                RichText::new(format!("{}", current.as_ref().map_or("choose a machine", |c| c.name.as_str()))).strong(),
-            )
+            .selected_text(RichText::new(current.as_ref().map_or("choose a machine", |c| c.name.as_str())).strong())
             .width(170.0)
             .show_ui(ui, |ui| {
                 for target in &self.targets {

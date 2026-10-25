@@ -5,6 +5,10 @@
 `dojo verify`.
 
 ## Done
+- Workspace: lab steps beside a terminal pane; exam workspace with timer, flags and terminal.
+- Polished UI: icons drawn in code, quiz answer cards, progress rings, searchable lessons,
+  shortcuts, light and dark themes; macOS app bundle (`cargo xtask bundle --install`).
+- Doctor warns when kubectl is more than one minor version from the lab cluster.
 - Machines: every Docker context (local, ssh://, tcp://), engine probe, per-machine labs.
 - Lab cluster: kind on the chosen machine, own kubeconfig + guard, own Docker network.
 - Learn: concepts with ▶ Run snippets, quizzes with explanations, labs with hints, solutions and

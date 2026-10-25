@@ -63,16 +63,13 @@ impl App {
                 (DockerTab::Volumes, "Volumes", self.docker.volumes.len()),
                 (DockerTab::Networks, "Networks", self.docker.networks.len()),
             ] {
-                if ui
-                    .selectable_label(self.docker.tab == tab, RichText::new(format!("{label} ({n})")).size(15.0))
-                    .clicked()
-                {
+                if theme::tab(ui, &t, &format!("{label} · {n}"), self.docker.tab == tab, false).clicked() {
                     self.docker.tab = tab;
                 }
             }
             ui.separator();
             ui.add(egui::TextEdit::singleline(&mut self.docker.filter).hint_text("filter").desired_width(160.0));
-            if ui.button("⟳ Refresh").clicked() {
+            if crate::icons::button(ui, crate::icons::Icon::Refresh, "Refresh").clicked() {
                 self.refresh_docker(&ctx);
             }
             if self.jobs.busy("docker list") {
@@ -131,7 +128,7 @@ impl App {
                             .on_hover_text(field(r, "Image"));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let q = shell_quote(&name);
-                            if ui.small_button("🗑").on_hover_text(format!("docker rm -f {name}")).clicked() {
+                            if ui.small_button("remove").on_hover_text(format!("docker rm -f {name}")).clicked() {
                                 self.docker.confirm_remove = Some(name.clone());
                             }
                             if ui.small_button("inspect").clicked() {
@@ -206,7 +203,7 @@ impl App {
                 egui::TextEdit::singleline(&mut self.docker.pull).hint_text("nginx:1.27-alpine").desired_width(260.0),
             );
             let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if (ui.button("Pull").clicked() || enter) && !self.docker.pull.trim().is_empty() {
+            if (super::accent_button(ui, t, "Pull").clicked() || enter) && !self.docker.pull.trim().is_empty() {
                 run = Some(format!("docker pull {}", shell_quote(self.docker.pull.trim())));
             }
         });

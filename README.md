@@ -55,16 +55,23 @@ each answer, and a **Lab** with hints and worked solutions. A lesson is complete
 it, passed the quiz (70%) and passed every lab step. Your **CKAD readiness** combines lessons done and
 mock-exam scores, weighted like the exam.
 
+<p align="center">
+  <img src="docs/images/lab.png" alt="The lab workspace: the lab's steps on the left with the current step highlighted, a terminal on the right running kubectl against the lab cluster" width="100%">
+  <br><sub><b>The workspace</b>: steps on the left, a real terminal on the right (machine, folder, exit codes, one-click commands)</sub>
+</p>
+
 <table>
 <tr>
-<td width="50%" valign="top"><img src="docs/images/lesson.png" alt="A CKAD lesson on NetworkPolicies with objectives, concepts and a table" width="100%"></td>
-<td width="50%" valign="top"><img src="docs/images/lab.png" alt="A lab with four steps, each with Check, Hint and Solution buttons" width="100%"></td>
+<td width="50%" valign="top"><img src="docs/images/exam.png" alt="A mock exam in progress: timer bar, task list with weights and flags, the task, and the terminal" width="100%"><p align="center"><sub><b>Mock exam</b>: timer, flags, the task and your terminal</sub></p></td>
+<td width="50%" valign="top"><img src="docs/images/exams.png" alt="The exams page with three mock exams, their domain weights and the best score as a ring" width="100%"><p align="center"><sub><b>Exams</b>: best score, domain weights, review past attempts</sub></p></td>
 </tr>
 <tr>
-<td width="50%" valign="top"><img src="docs/images/cluster.png" alt="The lab cluster page listing pods with their status" width="100%"></td>
-<td width="50%" valign="top"><img src="docs/images/exams.png" alt="The mock exams page" width="100%"></td>
+<td width="50%" valign="top"><img src="docs/images/lesson.png" alt="A CKAD lesson on NetworkPolicies with objectives and concepts" width="100%"><p align="center"><sub><b>Concepts</b>: Markdown with runnable snippets</sub></p></td>
+<td width="50%" valign="top"><img src="docs/images/quiz.png" alt="A quiz with answers as cards" width="100%"><p align="center"><sub><b>Quiz</b>: every answer explained</sub></p></td>
 </tr>
 </table>
+
+<sub>Screenshots use sample progress.</sub>
 
 ## Get started
 
@@ -80,6 +87,14 @@ Then build and run (Rust 1.99, pinned in `rust-toolchain.toml`):
 ```bash
 cargo run -p poddojo --release
 ```
+
+Or install it as a regular macOS app (Dock, Spotlight, its own icon):
+
+```bash
+cargo xtask bundle --install
+```
+
+Shortcuts: <kbd>⌘1</kbd>–<kbd>⌘7</kbd> pages, <kbd>⌘J</kbd> terminal, <kbd>⌘T</kbd> a real terminal window with the lab environment.
 
 1. **Pick a machine** in the top bar. To add a Linux server once:
    `docker context create my-server --docker host=ssh://user@192.168.1.20`

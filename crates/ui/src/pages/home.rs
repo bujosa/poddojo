@@ -17,7 +17,7 @@ impl App {
                 greeting,
                 &format!(
                     "Train with real containers on your own machines. Pass the CKAD.{}",
-                    if streak > 0 { format!("   🔥 {streak}-day streak") } else { String::new() }
+                    if streak > 0 { format!("   ·   {streak}-day streak") } else { String::new() }
                 ),
             );
 
@@ -38,75 +38,136 @@ impl App {
 
     fn continue_card(&mut self, ui: &mut egui::Ui, t: &Tokens) {
         let resume = self.progress.resume(&self.catalog).cloned();
-        theme::card(t).fill(t.card).stroke(egui::Stroke::new(1.5, t.accent)).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            if let Some(exam) = self.progress.active_exam.clone() {
-                ui.label(RichText::new("⏱ Exam in progress").color(t.amber).strong());
-                let name = self.catalog.exam(&exam.exam_id).map_or(exam.exam_id.clone(), |e| e.title.clone());
-                ui.label(RichText::new(name).size(20.0).strong());
-                if accent_button(ui, t, "Back to the exam").clicked() {
-                    self.page = Page::Exams;
-                }
-                return;
-            }
-            match resume {
-                Some(l) => {
-                    let p = self.progress.lesson(&l.id).cloned().unwrap_or_default();
-                    ui.label(
-                        RichText::new(if p.last_seen > 0 { "Continue where you left off" } else { "Start here" })
-                            .color(t.accent)
-                            .strong(),
+        let (done, total) = self.progress.done_count(&self.catalog);
+        theme::card(t)
+            .stroke(egui::Stroke::new(1.5, t.accent.gamma_multiply(0.8)))
+            .inner_margin(egui::Margin::same(22))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal_top(|ui| {
+                    let ring = 150.0;
+                    ui.allocate_ui_with_layout(
+                        egui::vec2((ui.available_width() - ring - 30.0).max(200.0), 0.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            if let Some(exam) = self.progress.active_exam.clone() {
+                                ui.label(RichText::new("EXAM IN PROGRESS").size(12.0).strong().color(t.amber));
+                                let name =
+                                    self.catalog.exam(&exam.exam_id).map_or(exam.exam_id.clone(), |e| e.title.clone());
+                                ui.label(RichText::new(name).size(24.0).strong().color(strong(t)));
+                                ui.add_space(8.0);
+                                if accent_button(ui, t, "Back to the exam").clicked() {
+                                    self.page = Page::Exams;
+                                }
+                                return;
+                            }
+                            let Some(l) = resume.clone() else {
+                                ui.label(RichText::new("EVERY LESSON DONE").size(12.0).strong().color(t.good));
+                                ui.label(
+                                    RichText::new("Now prove it under exam conditions")
+                                        .size(24.0)
+                                        .strong()
+                                        .color(strong(t)),
+                                );
+                                ui.add_space(8.0);
+                                if accent_button(ui, t, "Take a mock exam").clicked() {
+                                    self.page = Page::Exams;
+                                }
+                                return;
+                            };
+                            let p = self.progress.lesson(&l.id).cloned().unwrap_or_default();
+                            ui.label(
+                                RichText::new(if p.last_seen > 0 {
+                                    "CONTINUE WHERE YOU LEFT OFF"
+                                } else {
+                                    "START HERE"
+                                })
+                                .size(12.0)
+                                .strong()
+                                .color(t.accent),
+                            );
+                            ui.label(RichText::new(&l.title).size(26.0).strong().color(strong(t)));
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} · {} · ~{} min{}",
+                                    if l.track == "ckad" { "CKAD" } else { "Docker Foundations" },
+                                    self.catalog.module_title(&l),
+                                    l.minutes,
+                                    if p.last_seen > 0 {
+                                        format!(" · opened {}", ago(p.last_seen))
+                                    } else {
+                                        String::new()
+                                    }
+                                ))
+                                .color(t.muted),
+                            );
+                            ui.add_space(10.0);
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 18.0;
+                                checkpoint(ui, t, "Concepts", p.read);
+                                if !l.quiz.is_empty() {
+                                    checkpoint(
+                                        ui,
+                                        t,
+                                        &format!("Quiz · {} questions", l.quiz.len()),
+                                        p.quiz.is_some_and(|q| q.passed()),
+                                    );
+                                }
+                                if let Some(lab) = &l.lab
+                                    && !lab.steps.is_empty()
+                                {
+                                    let n = p.steps.len().min(lab.steps.len());
+                                    checkpoint(
+                                        ui,
+                                        t,
+                                        &format!("Lab · {n}/{} steps", lab.steps.len()),
+                                        n == lab.steps.len(),
+                                    );
+                                }
+                            });
+                            ui.add_space(14.0);
+                            ui.horizontal(|ui| {
+                                if accent_button(ui, t, "Continue").clicked() {
+                                    self.open_lesson(&l.id);
+                                }
+                                let next: Vec<(String, String)> = self
+                                    .catalog
+                                    .ordered_lessons()
+                                    .skip_while(|x| x.id != l.id)
+                                    .skip(1)
+                                    .filter(|x| !self.progress.is_done(x))
+                                    .take(2)
+                                    .map(|x| (x.id.clone(), x.title.clone()))
+                                    .collect();
+                                if !next.is_empty() {
+                                    ui.add_space(10.0);
+                                    ui.label(RichText::new("Up next").color(t.muted));
+                                    for (k, (id, title)) in next.into_iter().enumerate() {
+                                        if k > 0 {
+                                            ui.label(RichText::new("·").color(t.muted));
+                                        }
+                                        if ui.link(RichText::new(title).color(t.text)).clicked() {
+                                            self.open_lesson(&id);
+                                        }
+                                    }
+                                }
+                            });
+                        },
                     );
-                    ui.label(RichText::new(&l.title).size(22.0).strong());
-                    ui.label(
-                        RichText::new(format!(
-                            "{} · {} · ~{} min",
-                            self.catalog.track(&l.track).map_or("", |t| t.title.as_str()),
-                            self.catalog.module_title(&l),
-                            l.minutes
-                        ))
-                        .color(t.muted),
-                    );
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        let step = |done: bool, text: &str| {
-                            RichText::new(format!("{} {text}", if done { "✔" } else { "○" })).color(if done {
-                                t.good
-                            } else {
-                                t.muted
-                            })
-                        };
-                        ui.label(step(p.read, "Concepts"));
-                        if !l.quiz.is_empty() {
-                            ui.label(step(p.quiz.is_some_and(|q| q.passed()), &format!("Quiz ({} q)", l.quiz.len())));
-                        }
-                        if let Some(lab) = &l.lab {
-                            ui.label(step(
-                                p.steps.len() == lab.steps.len() && !lab.steps.is_empty(),
-                                &format!("Lab {}/{}", p.steps.len(), lab.steps.len()),
-                            ));
-                        }
-                        if p.last_seen > 0 {
-                            ui.label(RichText::new(format!("· last opened {}", ago(p.last_seen))).color(t.muted));
-                        }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                        let f = if total == 0 { 0.0 } else { done as f32 / total as f32 };
+                        theme::ring(
+                            ui,
+                            t,
+                            f,
+                            ring,
+                            &format!("{:.0}%", f * 100.0),
+                            &format!("{done} of {total} lessons"),
+                            t.accent,
+                        );
                     });
-                    ui.add_space(6.0);
-                    if accent_button(ui, t, "▶  Continue").clicked() {
-                        self.open_lesson(&l.id);
-                    }
-                }
-                None if !self.catalog.lessons.is_empty() => {
-                    ui.label(RichText::new("Every lesson is done 🥋").size(20.0).strong());
-                    ui.label("Now prove it under exam conditions.");
-                    if accent_button(ui, t, "Take a mock exam").clicked() {
-                        self.page = Page::Exams;
-                    }
-                }
-                None => {
-                    ui.label("No lessons found.");
-                }
-            }
-        });
+                });
+            });
     }
 
     fn readiness_card(&mut self, ui: &mut egui::Ui, t: &Tokens) {
@@ -146,87 +207,83 @@ impl App {
     }
 
     fn environment_card(&mut self, ui: &mut egui::Ui, t: &Tokens) {
+        use crate::icons::{self, Icon};
         theme::card(t).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new("Your lab").strong());
-            ui.add_space(4.0);
-            match self.target() {
+            ui.label(RichText::new("Your lab").size(16.0).strong());
+            ui.add_space(8.0);
+            // Machine.
+            let (m_color, m_title, m_sub) = match self.target() {
                 Some(target) => {
-                    let info = self.engine.get(&target.name);
-                    ui.label(RichText::new(format!("🖧 {}", target.name)).size(17.0).strong());
-                    ui.label(
-                        RichText::new(if target.is_remote() {
-                            target.endpoint.clone()
-                        } else {
-                            "this computer".into()
-                        })
-                        .color(t.muted),
-                    );
-                    match info {
-                        Some(Ok(i)) => {
-                            ui.label(
-                                RichText::new(format!(
-                                    "Docker {} · {} · {} · {} CPUs · {:.1} GB",
-                                    i.server_version,
-                                    i.os,
-                                    i.arch,
-                                    i.cpus,
-                                    i.memory as f64 / 1e9
-                                ))
-                                .color(t.good),
-                            );
-                            ui.label(
-                                RichText::new(format!(
-                                    "{} containers ({} running) · {} images",
-                                    i.containers, i.running, i.images
-                                ))
-                                .color(t.muted),
-                            );
-                        }
-                        Some(Err(e)) => {
-                            ui.label(RichText::new(format!("Not answering: {e}")).color(t.bad));
-                        }
-                        None => {
-                            ui.label(RichText::new("checking…").color(t.muted));
-                        }
+                    let place = if target.is_remote() {
+                        target.endpoint.trim_start_matches("ssh://").to_string()
+                    } else {
+                        "this computer".into()
+                    };
+                    match self.engine.get(&target.name) {
+                        Some(Ok(i)) => (
+                            t.good,
+                            format!("{} · {place}", target.name),
+                            format!(
+                                "Docker {} · {} · {} CPUs · {:.1} GB · {} running / {} containers",
+                                i.server_version,
+                                i.arch,
+                                i.cpus,
+                                i.memory as f64 / 1e9,
+                                i.running,
+                                i.containers
+                            ),
+                        ),
+                        Some(Err(e)) => (t.bad, format!("{} · {place}", target.name), format!("Not answering: {e}")),
+                        None => (t.muted, format!("{} · {place}", target.name), "checking…".into()),
                     }
                 }
-                None => {
-                    ui.label(
-                        RichText::new(self.targets_error.clone().unwrap_or_else(|| "Looking for Docker…".into()))
-                            .color(t.muted),
-                    );
-                }
-            }
-            ui.add_space(6.0);
-            match &self.cluster {
-                Some(Status::Running { nodes }) => {
-                    ui.label(
-                        RichText::new(format!(
-                            "☸ Lab cluster running · {} nodes · {}",
-                            nodes.len(),
-                            nodes.first().map_or("", |n| n.version.as_str())
-                        ))
-                        .color(t.good),
-                    );
-                }
+                None => (
+                    t.muted,
+                    "No machine yet".into(),
+                    self.targets_error.clone().unwrap_or_else(|| "Looking for Docker…".into()),
+                ),
+            };
+            status_row(ui, t, Icon::Server, m_color, &m_title, &m_sub);
+            ui.add_space(8.0);
+            // Cluster.
+            let (c_color, c_title, c_sub) = match &self.cluster {
+                Some(Status::Running { nodes }) => (
+                    t.good,
+                    "kind-poddojo is running".to_string(),
+                    format!("{} nodes · Kubernetes {}", nodes.len(), nodes.first().map_or("", |n| n.version.as_str())),
+                ),
                 Some(Status::Missing) => {
-                    ui.label(RichText::new("☸ No lab cluster yet: the CKAD track needs one").color(t.amber));
-                    if ui.button("Create the lab cluster").clicked() {
-                        self.page = Page::Cluster;
-                    }
+                    (t.amber, "No lab cluster yet".into(), "The CKAD track needs one: about a minute to create".into())
                 }
-                Some(Status::Unreachable(e)) => {
-                    ui.label(RichText::new(format!("☸ Lab cluster unreachable: {e}")).color(t.bad));
-                }
-                None => {}
-            }
+                Some(Status::Unreachable(e)) => (t.bad, "Lab cluster unreachable".into(), e.clone()),
+                None => (t.muted, "Lab cluster".into(), "checking…".into()),
+            };
+            status_row(ui, t, Icon::Cluster, c_color, &c_title, &c_sub);
+            ui.add_space(12.0);
             ui.horizontal(|ui| {
-                if ui.button("Open terminal").clicked() {
+                if matches!(self.cluster, Some(Status::Missing)) && accent_button(ui, t, "Create lab cluster").clicked()
+                {
+                    self.page = Page::Cluster;
+                }
+                if icons::button(ui, Icon::Terminal, "Open terminal").clicked() {
                     self.open_terminal();
                 }
-                if ui.button("Explore Docker").clicked() {
+                if icons::button(ui, Icon::Container, "Explore Docker").clicked() {
                     self.page = Page::Docker;
+                }
+            });
+            ui.add_space(14.0);
+            ui.label(RichText::new("Last 14 days").size(12.5).color(t.muted));
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 5.0;
+                let today = chrono::Local::now().date_naive();
+                for back in (0..14).rev() {
+                    let day = today - chrono::Duration::days(back);
+                    let active = self.progress.active_days.contains(&day.format("%Y-%m-%d").to_string());
+                    let (rect, resp) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+                    ui.painter().rect_filled(rect, 4.0, if active { t.accent } else { t.border });
+                    resp.on_hover_text(day.format("%a %d %b").to_string());
                 }
             });
         });
@@ -301,4 +358,38 @@ impl App {
             }
         });
     }
+}
+
+fn strong(t: &Tokens) -> egui::Color32 {
+    if t.dark { egui::Color32::WHITE } else { egui::Color32::BLACK }
+}
+
+/// "✔ Concepts" or "○ Quiz": one of the three things that complete a lesson.
+fn checkpoint(ui: &mut egui::Ui, t: &Tokens, label: &str, done: bool) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+        let c = rect.center();
+        if done {
+            ui.painter().circle_filled(c, 8.0, t.good);
+            crate::icons::paint(ui.painter(), rect.shrink(4.0), crate::icons::Icon::Check, t.bg);
+        } else {
+            ui.painter().circle_stroke(c, 7.5, egui::Stroke::new(1.4, t.muted));
+        }
+        ui.label(RichText::new(label).color(if done { t.good } else { t.text }));
+    });
+}
+
+/// An icon tile with a status colour, a title and a detail line.
+fn status_row(ui: &mut egui::Ui, t: &Tokens, icon: crate::icons::Icon, color: egui::Color32, title: &str, sub: &str) {
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(40.0, 40.0), egui::Sense::hover());
+        ui.painter().rect_filled(rect, 10.0, color.gamma_multiply(0.14));
+        crate::icons::paint(ui.painter(), rect.shrink(10.0), icon, color);
+        ui.vertical(|ui| {
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+            ui.label(RichText::new(title).size(15.0).strong().color(strong(t)));
+            ui.label(RichText::new(sub).size(12.5).color(t.muted));
+        });
+    });
 }

@@ -8,6 +8,7 @@ impl App {
     pub fn progress_page(&mut self, ui: &mut egui::Ui) {
         let t = self.t;
         let mut open = None;
+        let mut review = None;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             let (done, total) = self.progress.done_count(&self.catalog);
             let minutes: u32 = self.progress.lessons.values().map(|p| p.minutes).sum();
@@ -36,7 +37,14 @@ impl App {
                             let Some(l) = self.catalog.lesson(id) else { continue };
                             let p = self.progress.lesson(id).cloned().unwrap_or_default();
                             theme::status_dot(ui, &t, self.progress.status(l));
-                            if ui.link(&l.title).clicked() {
+                            if ui
+                                .add(
+                                    egui::Label::new(RichText::new(&l.title).color(t.text)).sense(egui::Sense::click()),
+                                )
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                .on_hover_text("Open the lesson")
+                                .clicked()
+                            {
                                 open = Some(id.clone());
                             }
                             ui.label(if p.read { "read" } else { "" });
@@ -78,6 +86,13 @@ impl App {
                         ui.label(if a.passed { "pass" } else { "fail" });
                         ui.label(format!("{} min", a.minutes_used()));
                         ui.label(RichText::new(ago(a.finished_at)).small().color(t.muted));
+                        if ui
+                            .small_button("Review")
+                            .on_hover_text("Scores per domain and task, with solutions")
+                            .clicked()
+                        {
+                            review = Some(a.clone());
+                        }
                         ui.end_row();
                     }
                 });
@@ -85,6 +100,10 @@ impl App {
         });
         if let Some(id) = open {
             self.open_lesson(&id);
+        }
+        if let Some(a) = review {
+            self.exam.result = Some(a);
+            self.page = crate::Page::Exams;
         }
     }
 }

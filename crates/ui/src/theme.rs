@@ -82,7 +82,9 @@ pub fn apply(ctx: &egui::Context, t: &Tokens, zoom: f32) {
         w.corner_radius = CornerRadius::same(8);
     }
     v.widgets.inactive.weak_bg_fill = t.card_hover;
-    v.widgets.inactive.bg_fill = t.card_hover;
+    // Radio buttons, checkboxes and slider rails draw with bg_fill: keep them clearly visible.
+    v.widgets.inactive.bg_fill = if t.dark { Color32::from_rgb(52, 61, 104) } else { Color32::from_rgb(214, 220, 236) };
+    v.widgets.inactive.fg_stroke = Stroke::new(1.2, t.text);
     v.widgets.inactive.bg_stroke = Stroke::new(1.0, t.border);
     v.widgets.hovered.weak_bg_fill = t.accent_soft;
     v.widgets.hovered.bg_stroke = Stroke::new(1.0, t.accent);

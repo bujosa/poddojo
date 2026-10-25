@@ -1,7 +1,7 @@
 # Original PodDojo practice tasks; not recalled or official exam questions.
 id = "ckad-mock-3"
 title = "CKAD Mock Exam 3 (hard)"
-summary = "Independent performance tasks. All work is confined to the named lab namespaces and $PODDOJO_LAB_DIR. Each check awards an equal share of its task weight. Domain totals: design/build 20, deployment 20, observability 15, configuration/security 25, networking 20. No Ingress controller or metrics-server is required."
+summary = "Eighteen harder, multi-step tasks, closer to the toughest real-exam questions. Pass this one comfortably and you are ready to book the CKAD."
 minutes = 120
 pass_percent = 66
 setup = [

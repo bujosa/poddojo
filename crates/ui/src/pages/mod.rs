@@ -39,6 +39,7 @@ pub fn ago(ts: i64) -> String {
         0..60 => "just now".into(),
         60..3600 => format!("{} min ago", secs / 60),
         3600..86400 => format!("{} h ago", secs / 3600),
+        86400..172800 => "yesterday".into(),
         _ => format!("{} days ago", secs / 86400),
     }
 }

@@ -61,3 +61,34 @@ pub fn check(env: &LabEnv) -> Vec<Tool> {
 pub fn missing_required(tools: &[Tool]) -> Vec<&Tool> {
     tools.iter().filter(|t| t.required && t.version.is_none()).collect()
 }
+
+fn minor(version: &str) -> Option<u32> {
+    let v = version.trim().trim_start_matches('v');
+    let mut parts = v.split('.');
+    let major: u32 = parts.next()?.parse().ok()?;
+    let minor: u32 = parts.next()?.chars().take_while(char::is_ascii_digit).collect::<String>().parse().ok()?;
+    (major == 1).then_some(minor)
+}
+
+/// kubectl is supported within one minor version of the API server. Returns a warning when the
+/// client is further away (e.g. kubectl v1.34 against a v1.37 lab cluster).
+pub fn kubectl_skew(client: &str, server: &str) -> Option<String> {
+    let (c, s) = (minor(client)?, minor(server)?);
+    (c.abs_diff(s) > 1).then(|| {
+        format!(
+            "kubectl {client} is more than one minor version away from the lab cluster ({server}). Upgrade it (brew upgrade kubectl) so behaviour matches the exam."
+        )
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skew() {
+        assert!(kubectl_skew("v1.34.1", "v1.37.0").is_some());
+        assert!(kubectl_skew("v1.36.2", "v1.37.0").is_none());
+        assert!(kubectl_skew("garbage", "v1.37.0").is_none());
+    }
+}

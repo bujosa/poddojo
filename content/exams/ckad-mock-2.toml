@@ -1,7 +1,7 @@
 # Original PodDojo practice tasks; not recalled or official exam questions.
 id = "ckad-mock-2"
 title = "CKAD Mock Exam 2"
-summary = "Independent performance tasks. All work is confined to the named lab namespaces and $PODDOJO_LAB_DIR. Each check awards an equal share of its task weight. Domain totals: design/build 20, deployment 20, observability 15, configuration/security 25, networking 20. No Ingress controller or metrics-server is required."
+summary = "Seventeen new tasks on the same blueprint. Aim to finish with twenty minutes left to review your flagged tasks."
 minutes = 120
 pass_percent = 66
 setup = [
