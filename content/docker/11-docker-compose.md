@@ -80,6 +80,9 @@ cleanup = ["docker compose -p dojo-compose -f compose.yaml --profile debug down 
 networks:
   app:
     name: dojo-compose-net
+    ipam:
+      config:
+        - subnet: 10.214.11.0/24
 volumes:
   data:
     name: dojo-compose-data

@@ -38,9 +38,9 @@ cleanup = ["docker rm -f dojo-net-web dojo-net-client 2>/dev/null || true", "doc
 [[lab.steps]]
 title = "Create an application network"
 task = "Create the user-defined **bridge** network **dojo-net-front**. Inspect its driver and scope."
-hints = ["docker network create defaults to the bridge driver."]
+hints = ["docker network create defaults to the bridge driver.", "PodDojo labs pass an explicit subnet from 10.214.0.0/16 (here 10.214.1.0/24) so they work even when Docker's automatic address pools are used up."]
 solution = '''```bash
-docker network create --driver bridge dojo-net-front
+docker network create --driver bridge --subnet 10.214.1.0/24 dojo-net-front
 docker network inspect dojo-net-front
 ```'''
 
@@ -92,7 +92,7 @@ title = "Attach the client to two networks"
 task = "Create bridge network **dojo-net-back**. Connect the existing **dojo-net-client** to it with alias **dojo-inspector**, retaining its original front-network attachment and ability to fetch **http://dojo-http:80/**. Leave the web container only on the front network."
 hints = ["docker network connect attaches an existing container.", "Use --alias on network connect, rather than --network-alias."]
 solution = '''```bash
-docker network create --driver bridge dojo-net-back
+docker network create --driver bridge --subnet 10.214.2.0/24 dojo-net-back
 docker network connect --alias dojo-inspector dojo-net-back dojo-net-client
 docker inspect -f '{{json .NetworkSettings.Networks}}' dojo-net-client
 ```'''
@@ -122,12 +122,20 @@ computer ── PODDOJO_HOST:18090 ── host mapping ───┘
 
 Always name both endpoints when describing a connection: source namespace and destination address plus port. “Port 80 works” is incomplete; it might work from one container but fail from your browser because nothing is published.
 
+
+> **"all predefined address pools have been fully subnetted"?** Docker hands each new network a
+> subnet from a small set of default pools (172.17–31.0.0/16 and 192.168.0.0/16 cut into /20s, about
+> 31 networks). Machines with many Compose projects run out. Either remove networks you no longer
+> need (`docker network ls`, then `docker network rm NAME`), pass an explicit `--subnet` as these
+> labs do, or give the daemon bigger pools with `default-address-pools` in `daemon.json`. Kubernetes
+> has no such limit for Pods: the CNI plugin allocates Pod IPs from the cluster's Pod CIDR.
+
 ## Prefer a user-defined bridge
 
 The built-in network named `bridge` is a default attachment for containers without an explicit network selection. Containers there can communicate by IP under the usual bridge configuration, but do not get the same automatic name resolution that user-defined bridges provide. Avoid legacy links or hardcoded IP addresses as a substitute for a proper application network.
 
 ```bash
-docker network create --driver bridge dojo-net-front
+docker network create --driver bridge --subnet 10.214.1.0/24 dojo-net-front
 docker run -d --name dojo-net-web --network dojo-net-front \
   --network-alias dojo-http nginx:1.27-alpine
 docker run -d --name dojo-net-client --network dojo-net-front \
@@ -166,7 +174,7 @@ Peer containers sharing the bridge use `dojo-http:80`, not the published port 18
 An alias describes a role rather than a single container identity: `dojo-http` can remain your frontend endpoint while the backing container changes. Aliases are scoped to the network attachment. Do not assume an alias defined on the frontend network is visible to a container attached only to the backend network.
 
 ```bash
-docker network create dojo-net-back
+docker network create --subnet 10.214.2.0/24 dojo-net-back
 docker network connect --alias dojo-inspector dojo-net-back dojo-net-client
 docker network inspect dojo-net-back
 docker inspect -f '{{json .NetworkSettings.Networks}}' dojo-net-client

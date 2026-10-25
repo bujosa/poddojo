@@ -117,16 +117,21 @@ pub fn kind_config(settings: &Settings, target: &Target) -> String {
     s
 }
 
-/// Write the kind config and return the command that creates the cluster.
+/// Write the kind config and return the command that creates the cluster. When a `poddojo` kind
+/// cluster already exists on the machine (made by another PodDojo data folder, or the CLI), it is
+/// adopted: only its kubeconfig is exported into PodDojo's own file.
 pub fn create_command(paths: &Paths, settings: &Settings, target: &Target) -> std::io::Result<String> {
     std::fs::create_dir_all(&paths.root)?;
     let config = paths.root.join("kind-config.yaml");
     std::fs::write(&config, kind_config(settings, target))?;
+    let kubeconfig = shell_quote(&paths.kubeconfig().display().to_string());
     Ok(format!(
-        "{} && KIND_EXPERIMENTAL_DOCKER_NETWORK={NETWORK} kind create cluster --name {CLUSTER_NAME} --config {} --kubeconfig {} --wait 180s",
+        "if kind get clusters 2>/dev/null | grep -qx {CLUSTER_NAME}; then \
+         echo 'Adopting the existing {CLUSTER_NAME} kind cluster on this machine'; \
+         kind export kubeconfig --name {CLUSTER_NAME} --kubeconfig {kubeconfig}; \
+         else {} && KIND_EXPERIMENTAL_DOCKER_NETWORK={NETWORK} kind create cluster --name {CLUSTER_NAME} --config {} --kubeconfig {kubeconfig} --wait 180s; fi",
         ensure_network_command(),
         shell_quote(&config.display().to_string()),
-        shell_quote(&paths.kubeconfig().display().to_string())
     ))
 }
 
