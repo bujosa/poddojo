@@ -27,7 +27,15 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { target: String::new(), node_image: String::new(), worker: true, api_port: 16443, nodeport: 30080, zoom: 1.0, dark: true }
+        Self {
+            target: String::new(),
+            node_image: String::new(),
+            worker: true,
+            api_port: 16443,
+            nodeport: 30080,
+            zoom: 1.0,
+            dark: true,
+        }
     }
 }
 
@@ -40,7 +48,8 @@ impl Settings {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let text = serde_json::to_string_pretty(self).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let text =
+            serde_json::to_string_pretty(self).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, text)?;
         std::fs::rename(&tmp, path)

@@ -49,7 +49,12 @@ impl ExamAttempt {
 
 /// Score `exam` from each task's check results (`results[task_id]`); a task without results
 /// earns nothing.
-pub fn grade(exam: &Exam, results: &BTreeMap<String, Vec<CheckResult>>, started_at: i64, finished_at: i64) -> ExamAttempt {
+pub fn grade(
+    exam: &Exam,
+    results: &BTreeMap<String, Vec<CheckResult>>,
+    started_at: i64,
+    finished_at: i64,
+) -> ExamAttempt {
     let mut domains: BTreeMap<String, DomainScore> = BTreeMap::new();
     let mut tasks = Vec::new();
     let (mut earned, mut possible) = (0.0f32, 0.0f32);
@@ -64,7 +69,13 @@ pub fn grade(exam: &Exam, results: &BTreeMap<String, Vec<CheckResult>>, started_
         let d = domains.entry(task.domain.clone()).or_default();
         d.earned += got;
         d.possible += weight;
-        tasks.push(TaskResult { id: task.id.clone(), domain: task.domain.clone(), earned: got, possible: weight, checks });
+        tasks.push(TaskResult {
+            id: task.id.clone(),
+            domain: task.domain.clone(),
+            earned: got,
+            possible: weight,
+            checks,
+        });
     }
     let percent = if possible > 0.0 { 100.0 * earned / possible } else { 0.0 };
     ExamAttempt {
@@ -95,7 +106,9 @@ mod tests {
             task: String::new(),
             setup: vec![],
             solution: String::new(),
-            checks: (0..checks).map(|i| Check { name: format!("c{i}"), run: "true".into(), ..Default::default() }).collect(),
+            checks: (0..checks)
+                .map(|i| Check { name: format!("c{i}"), run: "true".into(), ..Default::default() })
+                .collect(),
         }
     }
 

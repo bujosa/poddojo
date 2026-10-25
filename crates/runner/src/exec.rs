@@ -69,7 +69,8 @@ pub fn shell_quote(s: &str) -> String {
 /// `PATH` plus the places Homebrew, Docker Desktop and cargo install tools: apps opened from the
 /// Finder start with a bare `PATH` and would not find `docker`, `kubectl`, `kind` or `helm`.
 pub fn search_path() -> String {
-    let mut parts: Vec<String> = std::env::var("PATH").unwrap_or_default().split(':').filter(|p| !p.is_empty()).map(String::from).collect();
+    let mut parts: Vec<String> =
+        std::env::var("PATH").unwrap_or_default().split(':').filter(|p| !p.is_empty()).map(String::from).collect();
     let home = dirs::home_dir().map(|h| h.display().to_string()).unwrap_or_default();
     for extra in [
         "/opt/homebrew/bin".to_string(),
@@ -169,7 +170,11 @@ fn reader(mut stream: impl Read + Send + 'static, live: Option<Arc<Mutex<String>
 fn kill_group(pid: u32) {
     #[cfg(unix)]
     {
-        let _ = Command::new("/bin/kill").args(["-9", "--", &format!("-{pid}")]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+        let _ = Command::new("/bin/kill")
+            .args(["-9", "--", &format!("-{pid}")])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
     }
     #[cfg(not(unix))]
     let _ = pid;

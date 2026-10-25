@@ -17,11 +17,29 @@ pub struct Tool {
 }
 
 const TOOLS: &[(&str, &str, bool, &str, &str)] = &[
-    ("docker", "the Docker CLI: every Docker lesson, and kind needs it", true, "docker version --format '{{.Client.Version}}'", "brew install --cask docker  (or Docker Engine on Linux)"),
-    ("kubectl", "the Kubernetes CLI: every CKAD lesson and exam", true, "kubectl version --client -o json | grep -m1 gitVersion", "brew install kubectl"),
+    (
+        "docker",
+        "the Docker CLI: every Docker lesson, and kind needs it",
+        true,
+        "docker version --format '{{.Client.Version}}'",
+        "brew install --cask docker  (or Docker Engine on Linux)",
+    ),
+    (
+        "kubectl",
+        "the Kubernetes CLI: every CKAD lesson and exam",
+        true,
+        "kubectl version --client -o json | grep -m1 gitVersion",
+        "brew install kubectl",
+    ),
     ("kind", "creates the lab cluster inside Docker on your chosen machine", true, "kind version", "brew install kind"),
     ("helm", "the Helm lessons (CKAD: Application Deployment)", false, "helm version --short", "brew install helm"),
-    ("ssh", "reaches remote machines (ssh:// Docker contexts)", false, "ssh -V 2>&1", "built into macOS and most Linux distributions"),
+    (
+        "ssh",
+        "reaches remote machines (ssh:// Docker contexts)",
+        false,
+        "ssh -V 2>&1",
+        "built into macOS and most Linux distributions",
+    ),
 ];
 
 pub fn check(env: &LabEnv) -> Vec<Tool> {

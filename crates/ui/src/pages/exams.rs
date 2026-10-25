@@ -1,0 +1,424 @@
+use std::collections::BTreeMap;
+use std::time::Duration;
+
+use egui::{Color32, RichText};
+use poddojo_core::{Exam, ExamAttempt, exam, now};
+use poddojo_runner::{cluster, lab};
+
+use super::{accent_button, ago, domain_title, title};
+use crate::jobs::Done;
+use crate::markdown::{self, Action};
+use crate::theme::{self, Tokens};
+use crate::{App, Drill, Page};
+
+impl App {
+    pub fn exams_page(&mut self, ui: &mut egui::Ui) {
+        let t = self.t;
+        let ctx = ui.ctx().clone();
+        if let Some(active) = self.progress.active_exam.clone()
+            && let Some(e) = self.catalog.exam(&active.exam_id).cloned()
+        {
+            self.exam_workspace(ui, &t, &ctx, &e, active.started_at);
+            return;
+        }
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            if let Some(result) = self.exam.result.clone() {
+                self.exam_result(ui, &t, &result);
+                ui.add_space(16.0);
+            }
+            if self.exam.drill.is_some() {
+                self.drill(ui, &t);
+                return;
+            }
+            title(ui, &t, "Exams", "Performance-based mock exams graded on your lab cluster, under the real exam's rules: 2 hours, ~66% to pass, kubernetes.io docs allowed, no hints.");
+            if !self.cluster_running() {
+                theme::card(&t).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(RichText::new("Mock exams need the lab cluster.").color(t.amber));
+                    if ui.button("Go to Cluster").clicked() {
+                        self.page = Page::Cluster;
+                    }
+                });
+                ui.add_space(8.0);
+            }
+            for e in self.catalog.exams.clone() {
+                theme::card(&t).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(&e.title).size(18.0).strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let busy = self.jobs.busy("exam");
+                            if ui.add_enabled(self.cluster_running() && !busy, egui::Button::new(RichText::new("▶ Start").strong())).clicked() {
+                                self.start_exam(&ctx, &e);
+                            }
+                            if busy {
+                                ui.spinner();
+                            }
+                        });
+                    });
+                    ui.label(RichText::new(format!("{} tasks · {} minutes · pass {}%", e.tasks.len(), e.minutes, e.pass_percent)).color(t.muted));
+                    if !e.summary.is_empty() {
+                        ui.label(&e.summary);
+                    }
+                    let mut weights: BTreeMap<&str, u32> = BTreeMap::new();
+                    for task in &e.tasks {
+                        *weights.entry(task.domain.as_str()).or_default() += task.weight;
+                    }
+                    ui.horizontal_wrapped(|ui| {
+                        for (d, w) in weights {
+                            theme::chip(ui, &format!("{} {w}%", domain_title(d)), t.muted, t.card_hover);
+                        }
+                    });
+                    let attempts: Vec<&ExamAttempt> = self.progress.exams.iter().filter(|a| a.exam_id == e.id).collect();
+                    if !attempts.is_empty() {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new("Attempts:").small().color(t.muted));
+                            for a in attempts.iter().rev().take(6) {
+                                ui.label(RichText::new(format!("{:.0}% ({})", a.percent, ago(a.finished_at))).small().color(if a.passed { t.good } else { t.amber }));
+                            }
+                        });
+                    }
+                });
+                ui.add_space(8.0);
+            }
+            if !self.exam.log.is_empty() {
+                egui::CollapsingHeader::new("Last exam log").show(ui, |ui| {
+                    ui.label(RichText::new(self.exam.log.trim_end()).monospace().size(12.0));
+                });
+            }
+            ui.add_space(8.0);
+            theme::card(&t).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new("Knowledge drill").size(18.0).strong());
+                ui.label(RichText::new("20 random questions from the lessons you have opened. Quick, no cluster needed: good for a coffee break.").color(t.muted));
+                if ui.button("Start a drill").clicked() {
+                    self.start_drill();
+                }
+            });
+        });
+    }
+
+    fn start_drill(&mut self) {
+        let mut pool: Vec<(String, usize)> = Vec::new();
+        for (id, l) in &self.catalog.lessons {
+            if self.progress.lesson(id).is_some() {
+                pool.extend((0..l.quiz.len()).map(|i| (id.clone(), i)));
+            }
+        }
+        if pool.len() < 5 {
+            pool = self
+                .catalog
+                .lessons
+                .iter()
+                .flat_map(|(id, l)| (0..l.quiz.len()).map(move |i| (id.clone(), i)))
+                .collect();
+        }
+        // Shuffle with a small LCG seeded by the clock (no rand dependency).
+        let mut seed = (now() as u64).wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        for i in (1..pool.len()).rev() {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            pool.swap(i, (seed >> 33) as usize % (i + 1));
+        }
+        pool.truncate(20);
+        let n = pool.len();
+        self.exam.drill = Some(Drill { questions: pool, answers: vec![None; n], submitted: false });
+    }
+
+    fn drill(&mut self, ui: &mut egui::Ui, t: &Tokens) {
+        let Some(mut drill) = self.exam.drill.take() else { return };
+        title(ui, t, "Knowledge drill", &format!("{} questions", drill.questions.len()));
+        let mut close = false;
+        for (i, (lesson, qi)) in drill.questions.iter().enumerate() {
+            let Some(q) = self.catalog.lesson(lesson).and_then(|l| l.quiz.get(*qi)) else { continue };
+            theme::card(t).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new(format!("{}. {}", i + 1, q.q)).strong());
+                for (j, c) in q.choices.iter().enumerate() {
+                    let picked = drill.answers.get(i).copied().flatten() == Some(j);
+                    let color = match (drill.submitted, j == q.answer, picked) {
+                        (true, true, _) => t.good,
+                        (true, false, true) => t.bad,
+                        _ => t.text,
+                    };
+                    if ui
+                        .add_enabled(!drill.submitted, egui::RadioButton::new(picked, RichText::new(c).color(color)))
+                        .clicked()
+                        && let Some(a) = drill.answers.get_mut(i)
+                    {
+                        *a = Some(j);
+                    }
+                }
+                if drill.submitted {
+                    ui.label(RichText::new(&q.why).small().color(t.muted));
+                }
+            });
+            ui.add_space(4.0);
+        }
+        ui.horizontal(|ui| {
+            if !drill.submitted {
+                if ui.button("Submit").clicked() {
+                    drill.submitted = true;
+                    let right = drill
+                        .questions
+                        .iter()
+                        .zip(&drill.answers)
+                        .filter(|((l, qi), a)| {
+                            self.catalog.lesson(l).and_then(|l| l.quiz.get(*qi)).is_some_and(|q| **a == Some(q.answer))
+                        })
+                        .count();
+                    self.toast(
+                        format!("Drill: {right}/{}", drill.questions.len()),
+                        right * 10 >= drill.questions.len() * 7,
+                    );
+                }
+            } else if ui.button("New drill").clicked() {
+                close = true;
+                self.start_drill();
+                return;
+            }
+            if ui.button("Close").clicked() {
+                close = true;
+            }
+        });
+        if !close {
+            self.exam.drill = Some(drill);
+        } else if self.exam.drill.is_none() {
+            self.exam.drill = None;
+        }
+    }
+
+    fn exam_env(&self, e: &Exam) -> Option<poddojo_runner::LabEnv> {
+        self.env_for(&format!("exam-{}", e.id))
+    }
+
+    fn start_exam(&mut self, ctx: &egui::Context, e: &Exam) {
+        let Some(env) = self.exam_env(e) else { return };
+        let exam = e.clone();
+        self.exam.log.clear();
+        self.jobs.spawn(ctx, "exam start", move |_| {
+            if let Err(err) = cluster::guard(&env) {
+                return Done::ExamStarted { exam: exam.id.clone(), ok: false, log: err };
+            }
+            let _ = lab::run_all(&exam.cleanup, &env, Duration::from_secs(300));
+            let setup: Vec<String> =
+                exam.setup.iter().chain(exam.tasks.iter().flat_map(|t| &t.setup)).cloned().collect();
+            let (ok, log) = lab::run_all(&setup, &env, Duration::from_secs(600));
+            Done::ExamStarted { exam: exam.id.clone(), ok, log }
+        });
+    }
+
+    fn grade_exam(&mut self, ctx: &egui::Context, e: &Exam, started_at: i64) {
+        let Some(env) = self.exam_env(e) else { return };
+        let exam = e.clone();
+        self.jobs.spawn(ctx, "exam grade", move |_| {
+            let results = exam.tasks.iter().map(|t| (t.id.clone(), lab::run_checks(&t.checks, &env))).collect();
+            Done::ExamGraded(exam::grade(&exam, &results, started_at, now()))
+        });
+    }
+
+    fn exam_workspace(&mut self, ui: &mut egui::Ui, t: &Tokens, ctx: &egui::Context, e: &Exam, started_at: i64) {
+        let left = e.minutes as i64 * 60 - (now() - started_at);
+        ctx.request_repaint_after(Duration::from_secs(1));
+        let flagged = self.progress.active_exam.as_ref().map(|a| a.flagged.clone()).unwrap_or_default();
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(&e.title).size(22.0).strong());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let grading = self.jobs.busy("exam grade");
+                if ui.add_enabled(!grading, egui::Button::new(RichText::new("Finish & grade").strong())).clicked() {
+                    self.exam.confirm_finish = true;
+                }
+                if grading {
+                    ui.spinner();
+                    ui.label("grading…");
+                }
+                ui.add_space(10.0);
+                let (mm, ss) = (left.abs() / 60, left.abs() % 60);
+                let text =
+                    if left >= 0 { format!("⏱ {mm}:{ss:02}") } else { format!("⏱ -{mm}:{ss:02} (time is up)") };
+                let color = if left < 0 {
+                    t.bad
+                } else if left < 15 * 60 {
+                    t.amber
+                } else {
+                    t.text
+                };
+                ui.label(RichText::new(text).size(22.0).strong().monospace().color(color));
+            });
+        });
+        ui.label(RichText::new("Work in the console or Open terminal (each task names its namespace). No hints and no grading until you finish, like the real exam.").small().color(t.muted));
+        ui.separator();
+        super::split_left(ui, 250.0, |ui, left| {
+            if left {
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                egui::ScrollArea::vertical().id_salt("exam-tasks").show(ui, |ui| {
+                    for (i, task) in e.tasks.iter().enumerate() {
+                        let flag = if flagged.contains(&task.id) { "⚑ " } else { "" };
+                        let text = RichText::new(format!("{flag}{}. {} · {}%", i + 1, task.title, task.weight))
+                            .color(if flagged.contains(&task.id) { t.amber } else { t.text });
+                        if ui.selectable_label(self.exam.task == i, text).clicked() {
+                            self.exam.task = i;
+                            if let Some(a) = &mut self.progress.active_exam {
+                                a.current_task = i;
+                            }
+                        }
+                    }
+                });
+                return;
+            }
+            let Some(task) = e.tasks.get(self.exam.task).cloned() else { return };
+            egui::ScrollArea::vertical().id_salt(format!("exam-task-{}", task.id)).auto_shrink([false, false]).show(
+                ui,
+                |ui| {
+                    ui.set_max_width(ui.available_width().min(860.0));
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(
+                            RichText::new(format!("Task {} of {}", self.exam.task + 1, e.tasks.len())).color(t.muted),
+                        );
+                        theme::chip(ui, &format!("{}%", task.weight), t.accent, t.accent_soft);
+                        theme::chip(ui, domain_title(&task.domain), t.muted, t.card_hover);
+                        if let Some(ns) = &task.namespace {
+                            theme::chip(ui, &format!("namespace {ns}"), t.amber, t.card_hover);
+                        }
+                    });
+                    ui.label(RichText::new(&task.title).size(20.0).strong().color(if t.dark {
+                        Color32::WHITE
+                    } else {
+                        Color32::BLACK
+                    }));
+                    if let Some(Action::Run(cmd)) = markdown::show(ui, t, &task.task, &format!("exam-{}", task.id)) {
+                        self.run_in_console(ctx, &cmd);
+                    }
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        let is_flagged = flagged.contains(&task.id);
+                        if ui.button(if is_flagged { "Unflag" } else { "⚑ Flag for review" }).clicked()
+                            && let Some(a) = &mut self.progress.active_exam
+                        {
+                            if is_flagged {
+                                a.flagged.remove(&task.id);
+                            } else {
+                                a.flagged.insert(task.id.clone());
+                            }
+                            self.save_progress();
+                        }
+                        if self.exam.task > 0 && ui.button("← Previous").clicked() {
+                            self.exam.task -= 1;
+                        }
+                        if self.exam.task + 1 < e.tasks.len() && accent_button(ui, t, "Next →").clicked() {
+                            self.exam.task += 1;
+                        }
+                    });
+                },
+            );
+        });
+        if self.exam.confirm_finish {
+            let mut open = true;
+            egui::Window::new("Finish the exam?")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    ui.label("Every task is graded now on the lab cluster. You can't change answers afterwards.");
+                    if !flagged.is_empty() {
+                        ui.label(RichText::new(format!("{} task(s) still flagged.", flagged.len())).color(t.amber));
+                    }
+                    ui.horizontal(|ui| {
+                        if ui.button(RichText::new("Grade now").strong()).clicked() {
+                            self.grade_exam(ctx, e, started_at);
+                            open = false;
+                        }
+                        if ui.button("Keep working").clicked() {
+                            open = false;
+                        }
+                        if ui.button(RichText::new("Abandon (no score)").color(t.bad)).clicked() {
+                            self.progress.active_exam = None;
+                            self.save_progress();
+                            open = false;
+                        }
+                    });
+                });
+            self.exam.confirm_finish = open;
+        }
+    }
+
+    fn exam_result(&mut self, ui: &mut egui::Ui, t: &Tokens, a: &ExamAttempt) {
+        let exam = self.catalog.exam(&a.exam_id).cloned();
+        theme::card(t).stroke(egui::Stroke::new(1.5, if a.passed { t.good } else { t.amber })).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(format!("{:.1}%", a.percent)).size(40.0).strong().color(if a.passed {
+                    t.good
+                } else {
+                    t.amber
+                }));
+                ui.vertical(|ui| {
+                    ui.label(
+                        RichText::new(if a.passed { "PASS 🥋" } else { "Not yet: keep training" }).size(20.0).strong(),
+                    );
+                    ui.label(RichText::new(format!("{} · {} min used", a.title, a.minutes_used())).color(t.muted));
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Close").clicked() {
+                        self.exam.result = None;
+                    }
+                });
+            });
+            ui.add_space(6.0);
+            let w = (ui.available_width() * 0.5).max(160.0);
+            for (d, s) in &a.domains {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("{:<48}", domain_title(d))).size(13.0));
+                    theme::bar(ui, t, s.percent() / 100.0, w, if s.percent() >= 66.0 { t.good } else { t.amber });
+                    ui.label(RichText::new(format!("{:.0}%", s.percent())).size(13.0));
+                });
+            }
+            ui.add_space(8.0);
+            ui.label(RichText::new("Task by task").strong());
+            for r in &a.tasks {
+                let task = exam.as_ref().and_then(|e| e.tasks.iter().find(|x| x.id == r.id));
+                let full = r.earned + 0.01 >= r.possible;
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(if full {
+                            "✔"
+                        } else if r.earned > 0.0 {
+                            "½"
+                        } else {
+                            "✖"
+                        })
+                        .color(if full {
+                            t.good
+                        } else if r.earned > 0.0 {
+                            t.amber
+                        } else {
+                            t.bad
+                        }),
+                    );
+                    ui.label(format!("{} · {}", r.id, task.map_or("", |x| x.title.as_str())));
+                    ui.label(RichText::new(format!("{:.1}/{:.0}", r.earned, r.possible)).color(t.muted));
+                    if task.is_some_and(|x| !x.solution.is_empty()) {
+                        let open = self.exam.reveal.contains(&r.id);
+                        if ui.small_button(if open { "hide solution" } else { "solution" }).clicked() {
+                            if open {
+                                self.exam.reveal.remove(&r.id);
+                            } else {
+                                self.exam.reveal.insert(r.id.clone());
+                            }
+                        }
+                    }
+                });
+                for c in r.checks.iter().filter(|c| !c.passed) {
+                    ui.label(RichText::new(format!("      ✖ {}: {}", c.name, c.detail)).small().color(t.bad));
+                }
+                if self.exam.reveal.contains(&r.id)
+                    && let Some(task) = task
+                {
+                    egui::Frame::new().fill(t.card_hover).corner_radius(8).inner_margin(10).show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        markdown::show(ui, t, &task.solution, &format!("res-{}", r.id));
+                    });
+                }
+            }
+        });
+    }
+}

@@ -56,7 +56,8 @@ impl Ctx {
     fn load() -> Result<Self, String> {
         let paths = Paths::discover();
         let settings = Settings::load(&paths.settings());
-        let catalog = Catalog::load().map_err(|errs| errs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("\n"))?;
+        let catalog =
+            Catalog::load().map_err(|errs| errs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("\n"))?;
         let progress = Progress::load(&paths.progress()).map_err(|e| format!("could not read progress: {e}"))?;
         Ok(Self { paths, settings, catalog, progress })
     }
@@ -67,7 +68,8 @@ impl Ctx {
 
     fn target(&self) -> Result<Target, String> {
         let all = targets::list(&self.paths)?;
-        targets::choose(&all, &self.settings.target).ok_or_else(|| "no Docker contexts found: is Docker installed?".to_string())
+        targets::choose(&all, &self.settings.target)
+            .ok_or_else(|| "no Docker contexts found: is Docker installed?".to_string())
     }
 
     fn env_for(&self, id: &str) -> Result<LabEnv, String> {
@@ -118,7 +120,9 @@ fn dispatch(args: &[&str]) -> Result<(), String> {
         ["quiz", id] => quiz(&mut Ctx::load()?, id),
         ["prepare", id] => prepare(&mut Ctx::load()?, id),
         ["check", id] => check(&mut Ctx::load()?, id, None),
-        ["check", id, step] => check(&mut Ctx::load()?, id, Some(step.parse::<usize>().map_err(|_| "step must be a number")?)),
+        ["check", id, step] => {
+            check(&mut Ctx::load()?, id, Some(step.parse::<usize>().map_err(|_| "step must be a number")?))
+        }
         ["reset", id] => reset(&mut Ctx::load()?, id),
         ["targets"] => list_targets(&Ctx::load()?),
         ["use", name] => use_target(&mut Ctx::load()?, name),
@@ -222,7 +226,15 @@ fn status(c: &Ctx, json: bool) -> Result<(), String> {
     println!("\nCKAD readiness {:.0}%", overall);
     for r in &readiness {
         let exam = r.best_exam.map_or("no exam yet".to_string(), |e| format!("best exam {e:.0}%"));
-        println!("  {} {:>3}% {} ({}%, {}/{} lessons, {exam})", bar(r.score(), 20), (r.score() * 100.0) as u32, r.title, r.weight, r.lessons_done, r.lessons_total);
+        println!(
+            "  {} {:>3}% {} ({}%, {}/{} lessons, {exam})",
+            bar(r.score(), 20),
+            (r.score() * 100.0) as u32,
+            r.title,
+            r.weight,
+            r.lessons_done,
+            r.lessons_total
+        );
     }
     if let Some(e) = &c.progress.active_exam {
         println!("\n⏱  exam `{}` in progress: `dojo exam status`", e.exam_id);
@@ -243,7 +255,10 @@ fn next(c: &Ctx) -> Result<(), String> {
             println!("  module: {} · ~{} min", c.catalog.module_title(l), l.minutes);
             println!("  concepts: {}", if p.read { "read" } else { "to read (`dojo show`, then `dojo read`)" });
             if !l.quiz.is_empty() {
-                println!("  quiz: {}", p.quiz.map_or("not taken (`dojo quiz`)".into(), |q| format!("{}/{}", q.correct, q.total)));
+                println!(
+                    "  quiz: {}",
+                    p.quiz.map_or("not taken (`dojo quiz`)".into(), |q| format!("{}/{}", q.correct, q.total))
+                );
             }
             if let Some(lab) = &l.lab {
                 println!("  lab: {}/{} steps (`dojo prepare`, then `dojo check`)", p.steps.len(), lab.steps.len());
@@ -276,7 +291,12 @@ fn lessons(c: &Ctx) -> Result<(), String> {
 fn show(c: &Ctx, id: &str) -> Result<(), String> {
     let l = c.lesson(id)?;
     println!("# {}\n", l.title);
-    println!("{} · ~{} min{}\n", c.catalog.module_title(l), l.minutes, l.domain.as_deref().map(|d| format!(" · CKAD domain: {d}")).unwrap_or_default());
+    println!(
+        "{} · ~{} min{}\n",
+        c.catalog.module_title(l),
+        l.minutes,
+        l.domain.as_deref().map(|d| format!(" · CKAD domain: {d}")).unwrap_or_default()
+    );
     if !l.objectives.is_empty() {
         println!("You will be able to:");
         for o in &l.objectives {
@@ -324,7 +344,12 @@ fn quiz(c: &mut Ctx, id: &str) -> Result<(), String> {
     c.progress.open_lesson(&l, now());
     c.progress.record_quiz(&l, score, now());
     c.save()?;
-    println!("\nScore {}/{} {}", score.correct, score.total, if score.passed() { "· passed" } else { "· 70% needed to pass" });
+    println!(
+        "\nScore {}/{} {}",
+        score.correct,
+        score.total,
+        if score.passed() { "· passed" } else { "· 70% needed to pass" }
+    );
     Ok(())
 }
 
@@ -393,7 +418,13 @@ fn list_targets(c: &Ctx) -> Result<(), String> {
     let chosen = targets::choose(&all, &c.settings.target).map(|t| t.name);
     for t in &all {
         let star = if Some(&t.name) == chosen.as_ref() { "▶" } else { " " };
-        println!("{star} {:<16} {:<5} {}{}", t.name, format!("{:?}", t.kind).to_lowercase(), t.endpoint, if t.error.is_empty() { String::new() } else { format!("  ({})", t.error) });
+        println!(
+            "{star} {:<16} {:<5} {}{}",
+            t.name,
+            format!("{:?}", t.kind).to_lowercase(),
+            t.endpoint,
+            if t.error.is_empty() { String::new() } else { format!("  ({})", t.error) }
+        );
     }
     println!("\nChoose with `dojo use <machine>`. Add one: docker context create NAME --docker host=ssh://user@host");
     Ok(())
@@ -401,10 +432,15 @@ fn list_targets(c: &Ctx) -> Result<(), String> {
 
 fn use_target(c: &mut Ctx, name: &str) -> Result<(), String> {
     let all = targets::list(&c.paths)?;
-    let t = all.iter().find(|t| t.name == name).ok_or_else(|| format!("no Docker context `{name}` (see `dojo targets`)"))?;
+    let t = all
+        .iter()
+        .find(|t| t.name == name)
+        .ok_or_else(|| format!("no Docker context `{name}` (see `dojo targets`)"))?;
     let env = t.env(&c.paths, c.paths.root.clone());
     match targets::probe(&env) {
-        Ok(info) => println!("✓ {name}: Docker {} on {} ({}, {} CPUs)", info.server_version, info.os, info.arch, info.cpus),
+        Ok(info) => {
+            println!("✓ {name}: Docker {} on {} ({}, {} CPUs)", info.server_version, info.os, info.arch, info.cpus)
+        }
         Err(e) => println!("! {name} is not answering right now: {e}"),
     }
     c.settings.target = name.to_string();
@@ -412,7 +448,10 @@ fn use_target(c: &mut Ctx, name: &str) -> Result<(), String> {
     if let Some(rec) = cluster::ClusterRecord::load(&c.paths)
         && rec.target != name
     {
-        println!("! the lab cluster lives on `{}`: recreate it here with `dojo cluster down` then `dojo cluster up`", rec.target);
+        println!(
+            "! the lab cluster lives on `{}`: recreate it here with `dojo cluster down` then `dojo cluster up`",
+            rec.target
+        );
     }
     println!("labs now run on `{name}`");
     Ok(())
@@ -431,12 +470,20 @@ fn shell(c: &Ctx, id: &str) -> Result<(), String> {
 }
 
 fn run_doctor(c: &Ctx) -> Result<(), String> {
-    let env = LabEnv { docker_context: String::new(), kubeconfig: c.paths.kubeconfig(), workdir: c.paths.root.clone(), host: "127.0.0.1".into(), cluster: "poddojo".into() };
+    let env = LabEnv {
+        docker_context: String::new(),
+        kubeconfig: c.paths.kubeconfig(),
+        workdir: c.paths.root.clone(),
+        host: "127.0.0.1".into(),
+        cluster: "poddojo".into(),
+    };
     let tools = doctor::check(&env);
     for t in &tools {
         match &t.version {
             Some(v) => println!("✓ {:<8} {v}", t.name),
-            None => println!("{} {:<8} missing: {}  → {}", if t.required { "✗" } else { "!" }, t.name, t.why, t.install),
+            None => {
+                println!("{} {:<8} missing: {}  → {}", if t.required { "✗" } else { "!" }, t.name, t.why, t.install)
+            }
         }
     }
     match c.target() {
@@ -447,7 +494,11 @@ fn run_doctor(c: &Ctx) -> Result<(), String> {
                 Err(e) => println!("✗ machine  {}: {e}", t.name),
             }
             match cluster::status(&env) {
-                cluster::Status::Running { nodes } => println!("✓ cluster  kind-poddojo, {} node(s), {}", nodes.len(), nodes.first().map_or("", |n| n.version.as_str())),
+                cluster::Status::Running { nodes } => println!(
+                    "✓ cluster  kind-poddojo, {} node(s), {}",
+                    nodes.len(),
+                    nodes.first().map_or("", |n| n.version.as_str())
+                ),
                 cluster::Status::Missing => println!("· cluster  not created yet: `dojo cluster up`"),
                 cluster::Status::Unreachable(e) => println!("✗ cluster  {e}"),
             }
@@ -491,7 +542,9 @@ fn cluster_up(c: &Ctx) -> Result<(), String> {
     if !out.success() {
         return Err("kind create cluster failed".into());
     }
-    cluster::ClusterRecord { target: target.name.clone(), created_at: now() }.save(&c.paths).map_err(|e| e.to_string())?;
+    cluster::ClusterRecord { target: target.name.clone(), created_at: now() }
+        .save(&c.paths)
+        .map_err(|e| e.to_string())?;
     println!("\n✓ lab cluster ready on `{}`", target.name);
     cluster_status(c)
 }
@@ -517,8 +570,17 @@ fn cluster_down(c: &Ctx) -> Result<(), String> {
 
 fn exam_list(c: &Ctx) -> Result<(), String> {
     for e in &c.catalog.exams {
-        let best = c.progress.best_attempt(&e.id).map_or("not taken".to_string(), |a| format!("best {:.0}% {}", a.percent, if a.passed { "PASS" } else { "fail" }));
-        println!("{:<16} {:<36} {} tasks · {} min · pass {}% · {best}", e.id, e.title, e.tasks.len(), e.minutes, e.pass_percent);
+        let best = c.progress.best_attempt(&e.id).map_or("not taken".to_string(), |a| {
+            format!("best {:.0}% {}", a.percent, if a.passed { "PASS" } else { "fail" })
+        });
+        println!(
+            "{:<16} {:<36} {} tasks · {} min · pass {}% · {best}",
+            e.id,
+            e.title,
+            e.tasks.len(),
+            e.minutes,
+            e.pass_percent
+        );
     }
     Ok(())
 }
@@ -538,7 +600,8 @@ fn exam_start(c: &mut Ctx, id: &str) -> Result<(), String> {
         print!("{log}");
         return Err("exam setup failed".into());
     }
-    c.progress.active_exam = Some(poddojo_core::ActiveExam { exam_id: e.id.clone(), started_at: now(), ..Default::default() });
+    c.progress.active_exam =
+        Some(poddojo_core::ActiveExam { exam_id: e.id.clone(), started_at: now(), ..Default::default() });
     c.save()?;
     println!("⏱  {} started: {} minutes, {} tasks, pass {}%.", e.title, e.minutes, e.tasks.len(), e.pass_percent);
     println!("Work in: eval \"$(dojo env exam-{})\"   Then: dojo exam grade", e.id);
@@ -732,7 +795,11 @@ fn verify(c: &Ctx, what: &str, keep: bool) -> Result<(), String> {
             failures.push(l.id.clone());
         }
     }
-    if failures.is_empty() { Ok(()) } else { Err(format!("{} lesson(s) failed: {}", failures.len(), failures.join(", "))) }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("{} lesson(s) failed: {}", failures.len(), failures.join(", ")))
+    }
 }
 
 #[cfg(test)]

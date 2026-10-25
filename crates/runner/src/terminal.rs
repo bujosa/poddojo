@@ -43,7 +43,9 @@ pub fn open(env: &LabEnv, target: &str, data_root: &std::path::Path) -> Result<(
             .or_else(|_| Command::new("gnome-terminal").args(["--", &p]).spawn())
             .or_else(|_| Command::new("xterm").args(["-e", &p]).spawn())
     };
-    spawned.map(|_| ()).map_err(|e| format!("could not open a terminal: {e}. Run `eval \"$(dojo env)\"` in yours instead."))
+    spawned
+        .map(|_| ())
+        .map_err(|e| format!("could not open a terminal: {e}. Run `eval \"$(dojo env)\"` in yours instead."))
 }
 
 #[cfg(test)]

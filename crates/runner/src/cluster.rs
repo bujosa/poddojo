@@ -18,9 +18,12 @@ pub const NETWORK: &str = "dojo-kind";
 /// networks ("all predefined address pools have been fully subnetted"), so fall back to explicit,
 /// rarely used subnets instead of asking the learner to prune anything.
 pub fn ensure_network_command() -> String {
-    let candidates = ["10.213.7.0/24", "10.219.7.0/24", "10.227.7.0/24", "10.241.7.0/24", "172.40.7.0/24", "192.168.247.0/24"];
+    let candidates =
+        ["10.213.7.0/24", "10.219.7.0/24", "10.227.7.0/24", "10.241.7.0/24", "172.40.7.0/24", "192.168.247.0/24"];
     let opts = "--label poddojo=1 -o com.docker.network.bridge.enable_ip_masquerade=true";
-    let mut s = format!("docker network inspect {NETWORK} >/dev/null 2>&1 || docker network create {opts} {NETWORK} >/dev/null 2>&1");
+    let mut s = format!(
+        "docker network inspect {NETWORK} >/dev/null 2>&1 || docker network create {opts} {NETWORK} >/dev/null 2>&1"
+    );
     for c in candidates {
         s.push_str(&format!(" || docker network create {opts} --subnet {c} {NETWORK} >/dev/null 2>&1"));
     }
@@ -45,7 +48,8 @@ impl ClusterRecord {
     }
 
     pub fn save(&self, paths: &Paths) -> std::io::Result<()> {
-        let text = serde_json::to_string_pretty(self).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let text =
+            serde_json::to_string_pretty(self).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         std::fs::create_dir_all(&paths.root)?;
         std::fs::write(Self::path(paths), text)
     }
@@ -69,7 +73,9 @@ pub enum Status {
     Missing,
     /// The cluster exists but the API server does not answer (machine asleep, containers stopped).
     Unreachable(String),
-    Running { nodes: Vec<Node> },
+    Running {
+        nodes: Vec<Node>,
+    },
 }
 
 impl Status {
@@ -97,7 +103,10 @@ pub fn kind_config(settings: &Settings, target: &Target) -> String {
         s.push_str(&format!("    image: {}\n", settings.node_image));
     }
     s.push_str("    extraPortMappings:\n");
-    s.push_str(&format!("      - containerPort: 30080\n        hostPort: {}\n        protocol: TCP\n", settings.nodeport));
+    s.push_str(&format!(
+        "      - containerPort: 30080\n        hostPort: {}\n        protocol: TCP\n",
+        settings.nodeport
+    ));
     s.push_str("      - containerPort: 30443\n        hostPort: 30443\n        protocol: TCP\n");
     if settings.worker {
         s.push_str("  - role: worker\n");
@@ -141,7 +150,11 @@ pub fn guard(env: &LabEnv) -> Result<(), String> {
     if contexts.iter().all(|c| *c == CONTEXT) && !contexts.is_empty() {
         Ok(())
     } else {
-        Err(format!("refusing to continue: {} holds contexts other than {CONTEXT}: {}", env.kubeconfig.display(), contexts.join(", ")))
+        Err(format!(
+            "refusing to continue: {} holds contexts other than {CONTEXT}: {}",
+            env.kubeconfig.display(),
+            contexts.join(", ")
+        ))
     }
 }
 
@@ -177,7 +190,8 @@ pub fn parse_nodes(json: &str) -> Vec<Node> {
                 .pointer("/status/conditions")
                 .and_then(|c| c.as_array())
                 .is_some_and(|c| c.iter().any(|c| c["type"] == "Ready" && c["status"] == "True"));
-            let version = n.pointer("/status/nodeInfo/kubeletVersion").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+            let version =
+                n.pointer("/status/nodeInfo/kubeletVersion").and_then(|x| x.as_str()).unwrap_or_default().to_string();
             Node { name, role: role.into(), ready, version }
         })
         .collect()
@@ -194,7 +208,8 @@ mod tests {
         let cfg = kind_config(&Settings::default(), &t[0]);
         assert!(cfg.contains("apiServerAddress: \"10.0.0.11\""));
         assert!(cfg.contains("role: worker"));
-        let local = parse_contexts(r#"{"Current":true,"DockerEndpoint":"unix:///var/run/docker.sock","Name":"default"}"#);
+        let local =
+            parse_contexts(r#"{"Current":true,"DockerEndpoint":"unix:///var/run/docker.sock","Name":"default"}"#);
         assert!(kind_config(&Settings::default(), &local[0]).contains("127.0.0.1"));
     }
 

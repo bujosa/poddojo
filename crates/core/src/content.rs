@@ -337,7 +337,10 @@ impl Catalog {
                 continue;
             };
             if !track.modules.iter().any(|m| m.id == lesson.module) {
-                errors.push(err(&lesson.path, format!("module `{}` is not listed in {}/track.toml", lesson.module, track.id)));
+                errors.push(err(
+                    &lesson.path,
+                    format!("module `{}` is not listed in {}/track.toml", lesson.module, track.id),
+                ));
             }
             if let Some(prev) = catalog.lessons.get(&lesson.id) {
                 errors.push(err(&lesson.path, format!("duplicate lesson id `{}` (also {})", lesson.id, prev.path)));
@@ -583,7 +586,9 @@ run = "true"
     fn embedded_content_is_valid() {
         let catalog = match Catalog::embedded() {
             Ok(c) => c,
-            Err(errors) => panic!("content errors:\n{}", errors.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("\n")),
+            Err(errors) => {
+                panic!("content errors:\n{}", errors.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("\n"))
+            }
         };
         assert!(!catalog.tracks.is_empty());
     }

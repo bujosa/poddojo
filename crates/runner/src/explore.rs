@@ -166,7 +166,11 @@ pub enum Health {
 
 pub fn namespaces(env: &LabEnv) -> Result<Vec<String>, String> {
     cluster::guard(env)?;
-    let out = run("kubectl get namespaces -o jsonpath='{.items[*].metadata.name}' --request-timeout=8s", env, Duration::from_secs(12));
+    let out = run(
+        "kubectl get namespaces -o jsonpath='{.items[*].metadata.name}' --request-timeout=8s",
+        env,
+        Duration::from_secs(12),
+    );
     if !out.success() {
         return Err(out.combined());
     }
@@ -180,13 +184,20 @@ pub fn kube_get(env: &LabEnv, kind: &str, namespace: Option<&str>) -> Result<Vec
         Some(ns) => format!("-n {}", shell_quote(ns)),
         None => "-A".into(),
     };
-    let out = run(&format!("kubectl get {} {scope} -o json --request-timeout=10s", shell_quote(kind)), env, Duration::from_secs(15));
+    let out = run(
+        &format!("kubectl get {} {scope} -o json --request-timeout=10s", shell_quote(kind)),
+        env,
+        Duration::from_secs(15),
+    );
     if !out.success() {
         return Err(out.combined());
     }
     let v: serde_json::Value = serde_json::from_str(&out.stdout).map_err(|e| e.to_string())?;
     let now = chrono::Utc::now();
-    Ok(v.get("items").and_then(|i| i.as_array()).map(|items| items.iter().map(|o| summarize(kind, o, now)).collect()).unwrap_or_default())
+    Ok(v.get("items")
+        .and_then(|i| i.as_array())
+        .map(|items| items.iter().map(|o| summarize(kind, o, now)).collect())
+        .unwrap_or_default())
 }
 
 fn s<'a>(v: &'a serde_json::Value, ptr: &str) -> &'a str {
@@ -217,11 +228,13 @@ pub fn summarize(kind: &str, o: &serde_json::Value, now: chrono::DateTime<chrono
     };
     match kind {
         "pods" => {
-            let statuses = o.pointer("/status/containerStatuses").and_then(|c| c.as_array()).cloned().unwrap_or_default();
+            let statuses =
+                o.pointer("/status/containerStatuses").and_then(|c| c.as_array()).cloned().unwrap_or_default();
             let ready = statuses.iter().filter(|c| c["ready"] == true).count();
             let restarts: i64 = statuses.iter().map(|c| c["restartCount"].as_i64().unwrap_or(0)).sum();
             let waiting = statuses.iter().find_map(|c| c.pointer("/state/waiting/reason").and_then(|r| r.as_str()));
-            let terminated = statuses.iter().find_map(|c| c.pointer("/state/terminated/reason").and_then(|r| r.as_str()));
+            let terminated =
+                statuses.iter().find_map(|c| c.pointer("/state/terminated/reason").and_then(|r| r.as_str()));
             let phase = s(o, "/status/phase");
             let total = o.pointer("/spec/containers").and_then(|c| c.as_array()).map_or(0, Vec::len);
             k.status = waiting.or(terminated).unwrap_or(phase).to_string();
@@ -255,7 +268,13 @@ pub fn summarize(kind: &str, o: &serde_json::Value, now: chrono::DateTime<chrono
             let want = o.pointer("/spec/completions").and_then(|x| x.as_i64()).unwrap_or(1);
             let failed = n(o, "/status/failed");
             k.status = format!("{done}/{want}");
-            k.health = if done >= want { Health::Good } else if failed > 0 { Health::Bad } else { Health::Pending };
+            k.health = if done >= want {
+                Health::Good
+            } else if failed > 0 {
+                Health::Bad
+            } else {
+                Health::Pending
+            };
             if failed > 0 {
                 k.detail = format!("{failed} failed");
             }
@@ -288,7 +307,8 @@ pub fn summarize(kind: &str, o: &serde_json::Value, now: chrono::DateTime<chrono
         "events" => {
             k.status = s(o, "/type").to_string();
             k.health = if k.status == "Warning" { Health::Bad } else { Health::Neutral };
-            k.detail = format!("{} {}: {}", s(o, "/involvedObject/kind"), s(o, "/involvedObject/name"), s(o, "/message"));
+            k.detail =
+                format!("{} {}: {}", s(o, "/involvedObject/kind"), s(o, "/involvedObject/name"), s(o, "/message"));
         }
         "configmaps" | "secrets" => {
             let keys = o.get("data").and_then(|d| d.as_object()).map_or(0, |d| d.len());

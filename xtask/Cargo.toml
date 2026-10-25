@@ -6,3 +6,4 @@ license.workspace = true
 publish = false
 
 [dependencies]
+resvg = { version = "0.45", default-features = false, features = ["text", "system-fonts"] }

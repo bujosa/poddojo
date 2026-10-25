@@ -120,7 +120,8 @@ mod tests {
 
     #[test]
     fn run_all_stops_at_first_failure() {
-        let (ok, log) = run_all(&["echo one".into(), "false".into(), "echo three".into()], &env(), Duration::from_secs(5));
+        let (ok, log) =
+            run_all(&["echo one".into(), "false".into(), "echo three".into()], &env(), Duration::from_secs(5));
         assert!(!ok);
         assert!(log.contains("one"));
         assert!(!log.contains("three"));

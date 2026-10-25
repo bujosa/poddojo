@@ -95,7 +95,9 @@ impl Readiness {
 impl Progress {
     pub fn load(path: &Path) -> std::io::Result<Self> {
         match std::fs::read_to_string(path) {
-            Ok(text) => serde_json::from_str(&text).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+            Ok(text) => {
+                serde_json::from_str(&text).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self { version: VERSION, ..Self::default() }),
             Err(e) => Err(e),
         }
@@ -106,7 +108,8 @@ impl Progress {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let text = serde_json::to_string_pretty(self).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let text =
+            serde_json::to_string_pretty(self).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, text)?;
         std::fs::rename(&tmp, path)
@@ -233,7 +236,8 @@ impl Progress {
         DOMAINS
             .iter()
             .map(|d| {
-                let lessons: Vec<&Lesson> = catalog.lessons.values().filter(|l| l.domain.as_deref() == Some(d.id)).collect();
+                let lessons: Vec<&Lesson> =
+                    catalog.lessons.values().filter(|l| l.domain.as_deref() == Some(d.id)).collect();
                 let best_exam = self
                     .exams
                     .iter()

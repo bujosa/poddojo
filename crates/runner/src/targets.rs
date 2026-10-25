@@ -67,7 +67,14 @@ impl Target {
         } else {
             Kind::Local
         };
-        Self { name: r.name, description: r.description, endpoint: r.docker_endpoint, current: r.current, kind, error: r.error }
+        Self {
+            name: r.name,
+            description: r.description,
+            endpoint: r.docker_endpoint,
+            current: r.current,
+            kind,
+            error: r.error,
+        }
     }
 
     /// The host part of the endpoint (`ssh://user@10.0.0.11:22` → `10.0.0.11`).
@@ -101,7 +108,13 @@ impl Target {
 
     /// The lab environment for this machine with `workdir` as the working folder.
     pub fn env(&self, paths: &Paths, workdir: PathBuf) -> LabEnv {
-        LabEnv { docker_context: self.name.clone(), kubeconfig: paths.kubeconfig(), workdir, host: self.address(), cluster: CLUSTER_NAME.into() }
+        LabEnv {
+            docker_context: self.name.clone(),
+            kubeconfig: paths.kubeconfig(),
+            workdir,
+            host: self.address(),
+            cluster: CLUSTER_NAME.into(),
+        }
     }
 
     pub fn is_remote(&self) -> bool {
@@ -117,7 +130,13 @@ fn resolve_ssh_alias(alias: &str) -> Option<String> {
 
 /// An environment with no context set, for `docker context ls` itself.
 fn bare_env(paths: &Paths) -> LabEnv {
-    LabEnv { docker_context: String::new(), kubeconfig: paths.kubeconfig(), workdir: paths.root.clone(), host: "127.0.0.1".into(), cluster: CLUSTER_NAME.into() }
+    LabEnv {
+        docker_context: String::new(),
+        kubeconfig: paths.kubeconfig(),
+        workdir: paths.root.clone(),
+        host: "127.0.0.1".into(),
+        cluster: CLUSTER_NAME.into(),
+    }
 }
 
 /// All Docker contexts on this computer.
@@ -139,7 +158,12 @@ pub fn parse_contexts(text: &str) -> Vec<Target> {
 
 /// The configured target, or Docker's current context when none is set (or it vanished).
 pub fn choose(targets: &[Target], wanted: &str) -> Option<Target> {
-    targets.iter().find(|t| t.name == wanted).or_else(|| targets.iter().find(|t| t.current)).or_else(|| targets.first()).cloned()
+    targets
+        .iter()
+        .find(|t| t.name == wanted)
+        .or_else(|| targets.iter().find(|t| t.current))
+        .or_else(|| targets.first())
+        .cloned()
 }
 
 /// Ask the machine's engine about itself (`docker info`).
