@@ -206,7 +206,7 @@ impl App {
                 egui::TextEdit::singleline(&mut self.docker.pull).hint_text("nginx:1.27-alpine").desired_width(260.0),
             );
             let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if (ui.button("⬇ Pull").clicked() || enter) && !self.docker.pull.trim().is_empty() {
+            if (ui.button("Pull").clicked() || enter) && !self.docker.pull.trim().is_empty() {
                 run = Some(format!("docker pull {}", shell_quote(self.docker.pull.trim())));
             }
         });
