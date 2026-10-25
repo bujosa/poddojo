@@ -1,0 +1,29 @@
+id = "docker"
+title = "Docker Foundations"
+summary = "Containers from first principles: run, inspect, build, ship, store data, network and debug. Everything the CKAD assumes you already know about containers."
+order = 1
+
+[[modules]]
+id = "start"
+title = "Getting started"
+summary = "What a container really is, and how the Docker client talks to an engine on any machine."
+
+[[modules]]
+id = "containers"
+title = "Containers"
+summary = "Run, observe, enter, stop and remove containers; understand their lifecycle."
+
+[[modules]]
+id = "images"
+title = "Images"
+summary = "Layers, Dockerfiles, multi-stage builds, tags, digests and registries."
+
+[[modules]]
+id = "data-network"
+title = "Data and networking"
+summary = "Volumes, bind mounts, container networks and Compose."
+
+[[modules]]
+id = "operate"
+title = "Operate"
+summary = "Limits, security hardening and debugging: the bridge to Kubernetes."

@@ -1,0 +1,39 @@
+id = "ckad"
+title = "CKAD: Certified Kubernetes Application Developer"
+summary = "The full CKAD v1.37 curriculum, hands-on against your own lab cluster, domain by domain, ending in exam strategy."
+order = 2
+
+[[modules]]
+id = "foundations"
+title = "Kubernetes foundations"
+summary = "The lab cluster, the architecture, kubectl at exam speed, and Pods."
+
+[[modules]]
+id = "design-build"
+title = "Application Design and Build (20%)"
+summary = "Images, workload resources, Jobs and CronJobs, multi-container Pods and volumes."
+
+[[modules]]
+id = "deployment"
+title = "Application Deployment (20%)"
+summary = "Rolling updates, blue/green and canary, Helm and Kustomize."
+
+[[modules]]
+id = "observability"
+title = "Application Observability and Maintenance (15%)"
+summary = "Probes, logs, monitoring, debugging and API deprecations."
+
+[[modules]]
+id = "config-security"
+title = "Application Environment, Configuration and Security (25%)"
+summary = "ConfigMaps, Secrets, resources and quotas, ServiceAccounts and RBAC, SecurityContexts, CRDs and Operators."
+
+[[modules]]
+id = "networking"
+title = "Services and Networking (20%)"
+summary = "Services, Ingress and NetworkPolicies."
+
+[[modules]]
+id = "exam-prep"
+title = "Exam strategy"
+summary = "How the real exam works and how to pass it on the first attempt."
