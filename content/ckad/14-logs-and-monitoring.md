@@ -45,15 +45,13 @@ kubectl create namespace logs-monitoring-lab --dry-run=client -o yaml | kubectl 
 ''',
 '''
 set -e
-if kubectl get apiservice v1beta1.metrics.k8s.io >/dev/null 2>&1; then
-  echo 'Using the existing metrics API registration; leaving its installation unchanged.'
-else
-  curl -fsSL --retry 3 https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.8.0/components.yaml -o metrics-official.yaml
-  sed -e 's/metrics-server/dojo-logs-metrics-server/g' -e 's/system:dojo-logs-metrics-server/dojo-logs-metrics-reader/g' -e 's/system:aggregated-metrics-reader/dojo-logs-aggregated-metrics-reader/g' -e 's/namespace: kube-system/namespace: logs-monitoring-lab/g' -e '/kind: RoleBinding/,/roleRef:/s/namespace: logs-monitoring-lab/namespace: kube-system/' metrics-official.yaml > metrics-components.yaml
-  kubectl apply -f metrics-components.yaml
-  kubectl label apiservice v1beta1.metrics.k8s.io poddojo.io/lesson=logs-monitoring --overwrite
-  kubectl -n logs-monitoring-lab patch deployment dojo-logs-metrics-server --type=json -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+# metrics-server is a cluster add-on: installed once into the lab cluster and kept for later lessons.
+# kind's kubelets use self-signed certificates, hence --kubelet-insecure-tls (fine in a lab, never in production).
+if ! kubectl -n kube-system get deployment metrics-server >/dev/null 2>&1; then
+  kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.8.0/components.yaml
+  kubectl -n kube-system patch deployment metrics-server --type=json -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
 fi
+kubectl -n kube-system rollout status deployment/metrics-server --timeout=180s
 ''',
 '''
 kubectl apply -f workloads.yaml
@@ -61,18 +59,10 @@ kubectl apply -f workloads.yaml
 ]
 cleanup = [
 '''
-if [ "$(kubectl get apiservice v1beta1.metrics.k8s.io -o jsonpath='{.metadata.labels.poddojo\.io/lesson}' 2>/dev/null)" = logs-monitoring ]; then
-  kubectl delete apiservice v1beta1.metrics.k8s.io --ignore-not-found || true
-fi
-kubectl delete clusterrole dojo-logs-metrics-reader dojo-logs-aggregated-metrics-reader --ignore-not-found || true
-kubectl delete clusterrolebinding dojo-logs-metrics-reader dojo-logs-metrics-server:system:auth-delegator --ignore-not-found || true
-kubectl -n kube-system delete rolebinding dojo-logs-metrics-server-auth-reader --ignore-not-found || true
-''',
-'''
 kubectl delete namespace logs-monitoring-lab --ignore-not-found --wait=false || true
 ''',
 '''
-rm -f stream.log previous.log scheduling.txt usage.txt metrics-official.yaml metrics-components.yaml || true
+rm -f stream.log previous.log scheduling.txt usage.txt || true
 '''
 ]
 

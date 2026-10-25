@@ -185,16 +185,16 @@ hints = ["helm uninstall removes release-managed resources.", "Use --wait; the n
 solution = '''
 ```bash
 helm uninstall dojo-web --namespace helm-lab --wait --timeout 120s
-helm list --namespace helm-lab --all
+helm list --namespace helm-lab --deployed --failed --pending --superseded --uninstalling
 ```
 '''
 
 [[lab.steps.checks]]
 name = "release record and Deployment are gone"
 run = '''
-[ -z "$(helm list --namespace helm-lab --all -q --filter '^dojo-web$')" ] || exit 1
+[ -z "$(helm list --namespace helm-lab --deployed --failed --pending --uninstalling -q --filter '^dojo-web$')" ] || exit 1
 for i in $(seq 1 45); do
-  if [ -z "$(helm list --namespace helm-lab --all -q --filter '^dojo-web$')" ] && [ -z "$(kubectl -n helm-lab get deployment dojo-web --ignore-not-found -o name)" ]; then echo ok; exit 0; fi
+  if [ -z "$(helm list --namespace helm-lab --deployed --failed --pending --uninstalling -q --filter '^dojo-web$')" ] && [ -z "$(kubectl -n helm-lab get deployment dojo-web --ignore-not-found -o name)" ]; then echo ok; exit 0; fi
   sleep 2
 done
 exit 1
@@ -219,6 +219,12 @@ chart templates + default values + your overrides
 ```
 
 Helm is a client and release manager, not an application runtime. After Helm creates a Deployment, ordinary Kubernetes controllers reconcile its Pods. A release can exist while its application is unhealthy. Helm's success message and the application's readiness are different observations unless you explicitly wait for the relevant resources.
+
+
+> **Helm 3 or Helm 4?** Both are in use. Helm 4 removed `helm list --all`: to see releases in every
+> state, name the states (`--deployed --failed --pending --superseded --uninstalling`). Install,
+> upgrade, rollback, uninstall, `--set`, `-f` and `--namespace` work the same in both. Check the
+> exam environment's version with `helm version` before relying on a flag.
 
 ## Know the chart directory
 
