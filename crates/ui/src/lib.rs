@@ -1,14 +1,14 @@
 //! PodDojo's interface. Thin by design: it reads `poddojo-core` state, asks `poddojo-runner` to do
 //! things on background threads (`jobs`), and draws the result.
 
-mod console;
 pub mod icons;
 pub mod jobs;
 mod logo;
 pub mod mark;
 pub mod markdown;
 mod pages;
-pub mod theme;
+pub mod terminal;
+mod theme;
 
 pub use logo::icon_rgba;
 
@@ -24,9 +24,9 @@ use poddojo_runner::profiles::{self, Profile, Profiles};
 use poddojo_runner::targets::{self, EngineInfo, Target};
 use poddojo_runner::{LabEnv, Paths, Settings};
 
-use console::Console;
 use icons::Icon;
 use jobs::{Done, Jobs};
+use terminal::Terminal;
 use theme::Tokens;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,6 +135,8 @@ pub struct ExamState {
     pub result: Option<ExamAttempt>,
     pub reveal: BTreeSet<String>,
     pub confirm_finish: bool,
+    /// The task list drawer is open (narrow windows fold the list away).
+    pub drawer: bool,
     pub log: String,
     pub drill: Option<Drill>,
 }
@@ -161,7 +163,7 @@ pub struct App {
     pub page: Page,
     pub t: Tokens,
     pub jobs: Jobs,
-    pub console: Console,
+    pub term: Terminal,
     pub targets: Vec<Target>,
     pub targets_error: Option<String>,
     pub engine: BTreeMap<String, Result<EngineInfo, String>>,
@@ -215,7 +217,7 @@ impl App {
             page: Page::Welcome,
             t,
             jobs: Jobs::default(),
-            console: Console::default(),
+            term: Terminal::default(),
             targets: Vec::new(),
             targets_error: None,
             engine: BTreeMap::new(),
@@ -316,8 +318,8 @@ impl App {
         self.target().map(|t| t.env(&self.paths, workdir))
     }
 
-    /// Where console commands run: the open exam, else the open lesson, else a scratch folder.
-    pub fn console_env(&self) -> Option<LabEnv> {
+    /// Where the terminal runs: the open exam, else the open lesson, else a scratch folder.
+    pub fn terminal_env(&self) -> Option<LabEnv> {
         let id = if let Some(e) = &self.progress.active_exam {
             format!("exam-{}", e.exam_id)
         } else if let Some(l) = &self.learn.lesson {
@@ -414,22 +416,21 @@ impl App {
         self.toast(format!("Labs now run on {name}"), true);
     }
 
-    /// Run `cmd` in the console (shown with its live output).
-    pub fn run_in_console(&mut self, ctx: &egui::Context, cmd: &str) {
-        let Some(env) = self.console_env() else {
+    /// Type `cmd` into the terminal and run it, as if the learner did.
+    pub fn run_in_terminal(&mut self, cmd: &str) {
+        if self.terminal_env().is_none() {
             self.toast("No machine with Docker found: see Setup", false);
             return;
-        };
-        if !self.in_workspace() {
-            self.console.open = true;
         }
-        let entry = self.console.push(cmd, console::Console::place_label(Some(&env), &self.target_name()));
-        let cmd = cmd.to_string();
-        let id = self.jobs.spawn(ctx, format!("console {entry}"), move |live| Done::Console {
-            entry,
-            out: poddojo_runner::exec::run_live(&cmd, &env, Duration::from_secs(900), Some(live)),
-        });
-        self.console.set_job(entry, id);
+        if !self.in_workspace() {
+            self.term.open = true;
+        }
+        self.term.focus = true;
+        if self.term.busy() {
+            self.toast("The terminal is running a full-screen program: quit it first", false);
+            return;
+        }
+        self.term.run(cmd);
     }
 
     fn handle(&mut self, ctx: &egui::Context, done: Done) {
@@ -452,7 +453,6 @@ impl App {
                 }
                 self.cluster = Some(s);
             }
-            Done::Console { entry, out } => self.console.finish(entry, out),
             Done::Prepared { lesson, ok, log } => {
                 if self.learn.lesson.as_deref() == Some(lesson.as_str()) {
                     self.learn.lab_log = log;
@@ -462,14 +462,7 @@ impl App {
                     self.progress.record_prepared(&l, now());
                     self.save_progress();
                 }
-                self.toast(
-                    if ok {
-                        "Lab ready: work in the console or Open terminal"
-                    } else {
-                        "Lab setup failed: see the log"
-                    },
-                    ok,
-                );
+                self.toast(if ok { "Lab ready: work in the terminal" } else { "Lab setup failed: see the log" }, ok);
             }
             Done::Reset { lesson, ok, log } => {
                 if ok && let Some(l) = self.catalog.lesson(&lesson).cloned() {
@@ -656,7 +649,9 @@ impl App {
                 "Build and deliver images to Kubernetes".into(),
             ));
         }
-        let settled = since.elapsed() > Duration::from_secs(4) && self.jobs.running.is_empty();
+        let settled = since.elapsed() > Duration::from_secs(4)
+            && self.jobs.running.is_empty()
+            && self.term.settled(Duration::from_millis(2500));
         if !requested && (settled || since.elapsed() > Duration::from_secs(25)) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
             self.shot = Some((path, since, true));
@@ -664,12 +659,12 @@ impl App {
         ctx.request_repaint_after(Duration::from_millis(100));
     }
 
-    /// ⌘1–⌘7 switch pages, ⌘J toggles the console, ⌘T opens a real terminal.
+    /// ⌘1–⌘7 switch pages, ⌘J toggles the terminal, ⌘T opens an external one.
     fn shortcuts(&mut self, ctx: &egui::Context) {
         if self.profile.is_none() {
             return;
         }
-        let (page, console, terminal) = ctx.input_mut(|i| {
+        let (page, toggle, external) = ctx.input_mut(|i| {
             let mut page = None;
             for (n, key) in [
                 egui::Key::Num1,
@@ -696,15 +691,15 @@ impl App {
         if let Some(p) = page {
             self.page = p;
         }
-        if console {
+        if toggle {
             if self.in_workspace() {
-                self.console.focus = true;
+                self.term.focus = true;
             } else {
-                self.console.open = !self.console.open;
-                self.console.focus = self.console.open;
+                self.term.open = !self.term.open;
+                self.term.focus = self.term.open;
             }
         }
-        if terminal {
+        if external {
             self.open_terminal();
         }
     }
@@ -743,22 +738,17 @@ impl App {
                     ui.label(RichText::new("Docker + CKAD").size(12.0).color(t.muted));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let ctx = ui.ctx().clone();
-                        if icons::button(ui, Icon::Terminal, "Open terminal")
-                            .on_hover_text("A real shell with DOCKER_CONTEXT and KUBECONFIG set for the lab (⌘T)")
-                            .clicked()
-                        {
-                            self.open_terminal();
-                        }
                         if !self.in_workspace()
                             && icons::button(
                                 ui,
                                 Icon::Console,
-                                if self.console.open { "Hide console" } else { "Console" },
+                                if self.term.open { "Hide terminal" } else { "Terminal" },
                             )
-                            .on_hover_text("The built-in terminal (⌘J)")
+                            .on_hover_text("The built-in terminal, with the lab environment (⌘J)")
                             .clicked()
                         {
-                            self.console.open = !self.console.open;
+                            self.term.open = !self.term.open;
+                            self.term.focus = self.term.open;
                         }
                         ui.separator();
                         self.cluster_badge(ui);
@@ -805,22 +795,17 @@ impl App {
 
     /// Draw the terminal in `ui` and act on what the learner does with it.
     pub fn terminal(&mut self, ui: &mut egui::Ui, chips: &[String]) {
-        let t = self.t;
-        let env = self.console_env();
+        let env = self.terminal_env();
         let machine = self.target_name();
+        let home = self.paths.profile_dir();
         let chips: Vec<&str> = chips.iter().map(String::as_str).collect();
-        match self.console.ui(ui, &t, &self.jobs, env.as_ref(), &machine, &chips) {
-            Some(console::Action::Run(cmd)) => {
-                let ctx = ui.ctx().clone();
-                self.run_in_console(&ctx, &cmd);
-            }
-            Some(console::Action::OpenTerminal) => self.open_terminal(),
-            None => {}
+        if let Some(terminal::Action::OpenExternal) = self.term.ui(ui, env.as_ref(), &machine, &home, &chips) {
+            self.open_terminal();
         }
     }
 
     pub fn open_terminal(&mut self) {
-        match (self.console_env(), self.target()) {
+        match (self.terminal_env(), self.target()) {
             (Some(env), Some(t)) => {
                 if let Err(e) = poddojo_runner::terminal::open(&env, &t.name, &self.paths.root) {
                     self.toast(e, false);
@@ -989,7 +974,7 @@ impl App {
             self.demo_ran = true;
             if let Ok(cmds) = std::env::var("PODDOJO_RUN") {
                 for cmd in cmds.split(";;").map(str::trim).filter(|c| !c.is_empty()) {
-                    self.run_in_console(&ctx, cmd);
+                    self.run_in_terminal(cmd);
                 }
             }
         }
@@ -1029,12 +1014,12 @@ impl App {
         }
         self.top_bar(ui);
         self.nav(ui);
-        if self.console.open && !self.in_workspace() {
+        if self.term.open && !self.in_workspace() {
             let t = self.t;
-            egui::Panel::bottom("console")
+            egui::Panel::bottom("terminal")
                 .resizable(true)
-                .default_size(260.0)
-                .min_size(140.0)
+                .default_size(300.0)
+                .min_size(160.0)
                 .frame(egui::Frame::new().fill(t.bg).inner_margin(egui::Margin {
                     left: 14,
                     right: 14,

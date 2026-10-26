@@ -61,10 +61,14 @@ mock-exam scores, weighted like the exam.
 
 <p align="center">
   <img src="docs/images/lab.png" alt="The lab workspace: the lab's steps on the left with the current step highlighted, a terminal on the right running kubectl against the lab cluster" width="100%">
-  <br><sub><b>The workspace</b>: steps on the left, a real terminal on the right (machine, folder, exit codes, one-click commands)</sub>
+  <br><sub><b>The workspace</b>: steps on the left, a real interactive terminal on the right; drag the divider to resize</sub>
 </p>
 
 <table>
+<tr>
+<td width="50%" valign="top"><img src="docs/images/terminal-exec.png" alt="The built-in terminal inside a Pod after kubectl exec -it, running a shell loop" width="100%"><p align="center"><sub><b>kubectl exec -it</b>: an interactive shell in a Pod</sub></p></td>
+<td width="50%" valign="top"><img src="docs/images/terminal-vim.png" alt="vim editing a Pod manifest with syntax colours inside the built-in terminal" width="100%"><p align="center"><sub><b>vim</b>: edit manifests like in the exam</sub></p></td>
+</tr>
 <tr>
 <td width="50%" valign="top"><img src="docs/images/exam.png" alt="A mock exam in progress: timer bar, task list with weights and flags, the task, and the terminal" width="100%"><p align="center"><sub><b>Mock exam</b>: timer, flags, the task and your terminal</sub></p></td>
 <td width="50%" valign="top"><img src="docs/images/exams.png" alt="The exams page with three mock exams, their domain weights and the best score as a ring" width="100%"><p align="center"><sub><b>Exams</b>: best score, domain weights, review past attempts</sub></p></td>
@@ -107,8 +111,9 @@ Shortcuts: <kbd>⌘1</kbd>–<kbd>⌘7</kbd> pages, <kbd>⌘J</kbd> terminal, <k
    `docker context create my-server --docker host=ssh://user@192.168.1.20`
 3. Start with **Docker Foundations**, or jump to the CKAD track.
 4. For the CKAD track, create the **lab cluster** (Cluster page, about a minute).
-5. Work in the built-in console, or press **Open terminal** for a real shell that already points at
-   your machine and lab cluster.
+5. Work in the built-in terminal: a real shell (`vim`, `watch` and `kubectl exec -it` work) that
+   already points at your machine and lab cluster. **External** opens your own terminal app the
+   same way.
 
 ### Safety
 

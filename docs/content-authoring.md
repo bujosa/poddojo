@@ -123,7 +123,7 @@ differently (or breaks it in a way the field does not show) is graded wrongly.
 
 ## The lab environment
 
-Every command (setup, checks, solutions, and what the learner types in the console) runs with
+Every command (setup, checks, solutions, and what the learner types in the terminal) runs with
 `/bin/sh -c` in the lesson's lab folder and this environment:
 
 | Variable | Value |

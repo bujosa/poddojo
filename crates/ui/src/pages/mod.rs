@@ -65,3 +65,63 @@ pub fn split_left(ui: &mut egui::Ui, left_width: f32, mut draw: impl FnMut(&mut 
     });
     ui.allocate_rect(total, egui::Sense::hover());
 }
+
+/// Workspace minimums: instructions stay readable, the terminal keeps ~70 columns.
+pub const INSTRUCTIONS_MIN: f32 = 420.0;
+pub const TERMINAL_MIN: f32 = 560.0;
+/// Below this window width the exam's task list folds into a drawer.
+pub const DRAWER_BELOW: f32 = 1200.0;
+
+/// Space between panes; the divider's grab area.
+pub const DIVIDER: f32 = 14.0;
+
+/// Two panes side by side with a draggable divider. `left` is the left pane's width (0: `default`);
+/// it stays at least `min_left` wide and leaves `min_right` for the right pane when the space allows
+/// (otherwise the space is shared in proportion). Double-click the divider for the default width.
+/// Returns both rectangles and whether the learner just finished dragging (time to save `left`).
+pub fn resizable_split(
+    ui: &mut egui::Ui,
+    t: &Tokens,
+    id: &str,
+    total: egui::Rect,
+    left: &mut f32,
+    default: f32,
+    (min_left, min_right): (f32, f32),
+) -> (egui::Rect, egui::Rect, bool) {
+    let room = (total.width() - DIVIDER).max(0.0);
+    let (lo, hi) = if room >= min_left + min_right {
+        (min_left, room - min_right)
+    } else {
+        let share = room * min_left / (min_left + min_right);
+        (share, share)
+    };
+    let mut width = if *left > 0.0 { *left } else { default }.clamp(lo, hi);
+    let handle =
+        egui::Rect::from_min_size(egui::pos2(total.min.x + width, total.min.y), egui::vec2(DIVIDER, total.height()));
+    let resp = ui
+        .interact(handle, ui.id().with(("divider", id)), egui::Sense::click_and_drag())
+        .on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
+        .on_hover_text("Drag to resize · double-click to reset");
+    if resp.dragged() {
+        width = (width + resp.drag_delta().x).clamp(lo, hi);
+        *left = width;
+    }
+    let mut save = resp.drag_stopped();
+    if resp.double_clicked() {
+        width = default.clamp(lo, hi);
+        *left = 0.0;
+        save = true;
+    }
+    // A hairline that lights up with a grip while hovered or dragged.
+    let active = resp.hovered() || resp.dragged();
+    let x = total.min.x + width + DIVIDER / 2.0;
+    let line = if active { t.accent } else { t.border };
+    ui.painter().vline(x, total.y_range().shrink(6.0), egui::Stroke::new(if active { 2.0 } else { 1.0 }, line));
+    if active {
+        let c = egui::pos2(x, total.center().y);
+        ui.painter().rect_filled(egui::Rect::from_center_size(c, egui::vec2(6.0, 36.0)), 3.0, t.accent);
+    }
+    let left_rect = egui::Rect::from_min_size(total.min, egui::vec2(width, total.height()));
+    let right_rect = egui::Rect::from_min_max(egui::pos2(total.min.x + width + DIVIDER, total.min.y), total.max);
+    (left_rect, right_rect, save)
+}

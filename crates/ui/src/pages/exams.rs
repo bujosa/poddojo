@@ -1,11 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use egui::{Color32, RichText};
 use poddojo_core::{Exam, ExamAttempt, exam, now};
 use poddojo_runner::{cluster, lab};
 
-use super::{accent_button, ago, domain_title, title};
+use super::{DIVIDER, DRAWER_BELOW, INSTRUCTIONS_MIN, TERMINAL_MIN, accent_button, ago, domain_title, title};
 use crate::icons::{self, Icon};
 use crate::jobs::Done;
 use crate::markdown::{self, Action};
@@ -331,36 +331,48 @@ impl App {
         });
         ui.add_space(10.0);
         let total = ui.available_rect_before_wrap();
+        let drawer_was_open = self.exam.drawer;
         let list_w = 230.0;
-        let term_w = (total.width() * 0.42).clamp(380.0, 640.0);
-        let list = egui::Rect::from_min_size(total.min, egui::vec2(list_w, total.height()));
-        let task_rect = egui::Rect::from_min_max(
-            egui::pos2(total.min.x + list_w + 14.0, total.min.y),
-            egui::pos2(total.max.x - term_w - 14.0, total.max.y),
-        );
-        let term = egui::Rect::from_min_max(egui::pos2(total.max.x - term_w, total.min.y), total.max);
+        // Narrow windows fold the task list into a drawer so the task and the terminal keep room.
+        let drawer = ctx.content_rect().width() < DRAWER_BELOW
+            || total.width() < list_w + DIVIDER + INSTRUCTIONS_MIN + DIVIDER + TERMINAL_MIN;
+        if !drawer {
+            self.exam.drawer = false;
+        }
+        let work = if drawer {
+            total
+        } else {
+            egui::Rect::from_min_max(egui::pos2(total.min.x + list_w + DIVIDER, total.min.y), total.max)
+        };
+        let mut split = self.settings.exam_split;
+        let default = (work.width() * 0.5).max(INSTRUCTIONS_MIN);
+        let (task_rect, term, save) =
+            super::resizable_split(ui, t, "exam", work, &mut split, default, (INSTRUCTIONS_MIN, TERMINAL_MIN));
+        self.settings.exam_split = split;
+        if save {
+            self.save_settings();
+        }
         // Task list.
-        ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
-            ui.set_clip_rect(list.intersect(ui.clip_rect()));
-            egui::ScrollArea::vertical().id_salt("exam-tasks").auto_shrink([false, false]).show(ui, |ui| {
-                for (i, task) in e.tasks.iter().enumerate() {
-                    if task_row(ui, t, i + 1, &task.title, task.weight, self.exam.task == i, flagged.contains(&task.id))
-                        .clicked()
-                    {
-                        self.exam.task = i;
-                        if let Some(a) = &mut self.progress.active_exam {
-                            a.current_task = i;
-                        }
-                    }
-                }
+        if !drawer {
+            let list = egui::Rect::from_min_size(total.min, egui::vec2(list_w, total.height()));
+            ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
+                ui.set_clip_rect(list.intersect(ui.clip_rect()));
+                self.task_list(ui, t, e, &flagged);
             });
-        });
+        }
         // Task.
         ui.scope_builder(egui::UiBuilder::new().max_rect(task_rect), |ui| {
             ui.set_clip_rect(task_rect.intersect(ui.clip_rect()));
             let Some(task) = e.tasks.get(self.exam.task).cloned() else { return };
             egui::ScrollArea::vertical().id_salt(format!("exam-task-{}", task.id)).auto_shrink([false, false]).show(ui, |ui| {
-                ui.set_width(task_rect.width() - 12.0);
+                ui.set_width((task_rect.width() - 12.0).max(0.0));
+                if drawer {
+                    let label = format!("All tasks · {} of {}", self.exam.task + 1, e.tasks.len());
+                    if icons::button(ui, Icon::Book, &label).on_hover_text("Show the task list").clicked() {
+                        self.exam.drawer = !self.exam.drawer;
+                    }
+                    ui.add_space(8.0);
+                }
                 theme::card(t).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.horizontal_wrapped(|ui| {
@@ -380,7 +392,7 @@ impl App {
                     }
                     ui.add_space(4.0);
                     if let Some(Action::Run(cmd)) = markdown::show(ui, t, &task.task, &format!("exam-{}", task.id)) {
-                        self.run_in_console(ctx, &cmd);
+                        self.run_in_terminal(&cmd);
                     }
                 });
                 ui.add_space(8.0);
@@ -419,6 +431,9 @@ impl App {
             self.terminal(ui, &chips);
         });
         ui.allocate_rect(total, egui::Sense::hover());
+        if drawer {
+            self.task_drawer(ctx, t, e, &flagged, total, drawer_was_open);
+        }
         if self.exam.confirm_finish {
             let mut open = true;
             egui::Window::new("Finish the exam?")
@@ -446,6 +461,76 @@ impl App {
                     });
                 });
             self.exam.confirm_finish = open;
+        }
+    }
+
+    fn task_list(&mut self, ui: &mut egui::Ui, t: &Tokens, e: &Exam, flagged: &BTreeSet<String>) -> bool {
+        let mut picked = false;
+        egui::ScrollArea::vertical().id_salt("exam-tasks").auto_shrink([false, false]).show(ui, |ui| {
+            for (i, task) in e.tasks.iter().enumerate() {
+                if task_row(ui, t, i + 1, &task.title, task.weight, self.exam.task == i, flagged.contains(&task.id))
+                    .clicked()
+                {
+                    self.exam.task = i;
+                    if let Some(a) = &mut self.progress.active_exam {
+                        a.current_task = i;
+                    }
+                    picked = true;
+                }
+            }
+        });
+        picked
+    }
+
+    /// The task list sliding in over the workspace; picking a task or clicking outside closes it.
+    fn task_drawer(
+        &mut self,
+        ctx: &egui::Context,
+        t: &Tokens,
+        e: &Exam,
+        flagged: &BTreeSet<String>,
+        area: egui::Rect,
+        was_open: bool,
+    ) {
+        let open = ctx.animate_bool_with_time(egui::Id::new("exam-drawer"), self.exam.drawer, theme::motion(ctx, 0.18));
+        if open <= 0.0 {
+            return;
+        }
+        let width = 280.0_f32.min(area.width());
+        ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("exam-drawer-scrim"))).rect_filled(
+            area,
+            12.0,
+            Color32::from_black_alpha((90.0 * open) as u8),
+        );
+        let pos = egui::pos2(area.min.x - (1.0 - open) * (width + 20.0), area.min.y);
+        let inner = egui::Area::new(egui::Id::new("exam-drawer-area"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(pos)
+            .show(ctx, |ui| {
+                theme::card(t).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
+                    ui.set_width(width - 20.0);
+                    ui.set_height(area.height() - 20.0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Tasks").strong().color(strong(t)));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button("Close").clicked() {
+                                self.exam.drawer = false;
+                            }
+                        });
+                    });
+                    ui.add_space(6.0);
+                    if self.task_list(ui, t, e, flagged) {
+                        self.exam.drawer = false;
+                    }
+                });
+            });
+        let rect = inner.response.rect;
+        let clicked_outside = ctx.input(|i| {
+            i.pointer.any_click() && i.pointer.interact_pos().is_some_and(|p| area.contains(p) && !rect.contains(p))
+        });
+        // `was_open`: the click that opened it this frame does not count as outside.
+        if was_open && clicked_outside {
+            self.exam.drawer = false;
         }
     }
 

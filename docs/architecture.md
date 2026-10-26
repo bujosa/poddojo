@@ -15,7 +15,8 @@ crates/runner       exec      /bin/sh -c with the lab environment, timeouts, liv
                     lab       prepare / check / reset a lesson's lab
                     explore   docker ps/images/history, kubectl get … -o json summaries
                     doctor    docker, kubectl, kind, helm, ssh
-                    terminal  "Open terminal" with the lab environment
+                    shell     the built-in terminal: bash on a pseudo-terminal + a VT100 screen
+                    terminal  "External" terminal app with the lab environment
    │
 crates/ui           egui pages; every command runs on a thread (jobs.rs) and comes back as a message
    │
@@ -24,7 +25,7 @@ apps/poddojo        native window (eframe + glow)      apps/dojo   CLI on the sa
 
 ## The lab environment
 
-Every command PodDojo runs (lab setup, checks, the console, the terminal it opens) gets:
+Every command PodDojo runs (lab setup, checks, the built-in terminal, the external one it opens) gets:
 
 - `DOCKER_CONTEXT=<chosen machine>` and no `DOCKER_HOST`, so `docker` talks to that machine's engine
   (SSH contexts work exactly as in the learner's own terminal);
@@ -36,6 +37,16 @@ Every command PodDojo runs (lab setup, checks, the console, the terminal it open
 Talking to Docker and Kubernetes through their CLIs (instead of client libraries) keeps the binary
 small, inherits SSH, credential helpers and auth plugins for free, and is exactly how the CKAD is
 taken.
+
+## The built-in terminal
+
+`runner::shell` starts `bash --noprofile --rcfile <profile>/lab-shell.bashrc -i` on a
+pseudo-terminal (`pty-process`, rustix only). The rc file re-exports the lab environment after
+anything inherited, so the learner's dotfiles never point `KUBECONFIG` elsewhere, and adds the CKAD
+habits (`alias k=kubectl`, completion, `$do`). A reader thread feeds the output into a `vt100`
+screen model (scrollback, alternate screen, colours) and wakes the UI; a writer thread sends keys and
+pastes, so the UI never blocks. `ui::terminal` draws the grid cell by cell and maps egui keys to
+terminal bytes. A new machine or lab folder starts a new shell.
 
 ## The lab cluster
 
