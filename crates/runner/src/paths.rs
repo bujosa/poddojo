@@ -6,24 +6,34 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Paths {
     pub root: PathBuf,
+    /// The learner whose progress is used (`profiles::Profiles`); `None` before one is chosen.
+    pub profile: Option<String>,
 }
 
 impl Paths {
     pub fn discover() -> Self {
         if let Some(home) = std::env::var_os("PODDOJO_HOME").filter(|h| !h.is_empty()) {
-            return Self { root: PathBuf::from(home) };
+            return Self { root: PathBuf::from(home), profile: None };
         }
         let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
         let name = if cfg!(target_os = "macos") { "PodDojo" } else { "poddojo" };
-        Self { root: base.join(name) }
+        Self { root: base.join(name), profile: None }
     }
 
     pub fn at(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self { root: root.into(), profile: None }
+    }
+
+    /// The current profile's folder.
+    pub fn profile_dir(&self) -> PathBuf {
+        match &self.profile {
+            Some(id) => self.root.join("profiles").join(id),
+            None => self.root.clone(),
+        }
     }
 
     pub fn progress(&self) -> PathBuf {
-        self.root.join("progress.json")
+        self.profile_dir().join("progress.json")
     }
 
     pub fn settings(&self) -> PathBuf {

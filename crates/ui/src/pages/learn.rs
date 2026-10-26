@@ -17,7 +17,11 @@ impl App {
         self.progress.open_lesson(&l, now());
         self.save_progress();
         let p = self.progress.lesson(id).cloned().unwrap_or_default();
-        let tab = if !p.read {
+        let lab_in_progress =
+            l.has_lab() && !self.progress.is_done(&l) && (p.prepared_at.is_some() || !p.steps.is_empty());
+        let tab = if lab_in_progress {
+            LessonTab::Lab
+        } else if !p.read {
             LessonTab::Concepts
         } else if !l.quiz.is_empty() && !p.quiz.is_some_and(|q| q.passed()) {
             LessonTab::Quiz
@@ -32,6 +36,10 @@ impl App {
             answers: vec![None; l.quiz.len()],
             opened_at: Some(Instant::now()),
             scroll_to_top: true,
+            // Resume the lab session exactly where it was left.
+            results: p.results.clone(),
+            hints: p.hints.clone(),
+            prepared: p.prepared_at.is_some(),
             ..Default::default()
         };
         self.page = Page::Learn;
@@ -47,23 +55,148 @@ impl App {
             self.workspace(ui, &t, l);
             return;
         }
-        super::split_left(ui, 320.0, |ui, left| match (left, &lesson) {
-            (true, _) => self.lesson_tree(ui, &t),
-            (false, Some(l)) => self.lesson_view(ui, &t, l),
-            (false, None) => {
-                super::title(
-                    ui,
-                    &t,
-                    "Pick a lesson",
-                    "Docker first if containers are new to you, then the CKAD track domain by domain.",
+        let Some(l) = lesson else {
+            self.syllabus(ui, &t);
+            return;
+        };
+        super::split_left(ui, 320.0, |ui, left| {
+            if left {
+                self.lesson_tree(ui, &t);
+            } else {
+                self.lesson_view(ui, &t, &l);
+            }
+        });
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // Syllabus: every track and module at a glance, one click to any lesson.
+
+    fn syllabus(&mut self, ui: &mut egui::Ui, t: &Tokens) {
+        let mut open = None;
+        egui::ScrollArea::vertical().id_salt("syllabus").auto_shrink([false, false]).show(ui, |ui| {
+            let width = (ui.available_width() - 18.0).min(1180.0);
+            ui.set_max_width(width);
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("Learn").size(28.0).strong().color(strong(t)));
+                    ui.label(
+                        RichText::new(
+                            "Docker first if containers are new to you, then the CKAD track, domain by domain.",
+                        )
+                        .color(t.muted),
+                    );
+                });
+            });
+            ui.add_space(12.0);
+            if let Some(l) = self.progress.resume(&self.catalog).cloned() {
+                theme::card(t).stroke(Stroke::new(1.4, t.accent.gamma_multiply(0.7))).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        let (rect, _) = ui.allocate_exact_size(egui::vec2(40.0, 40.0), egui::Sense::hover());
+                        ui.painter().rect_filled(rect, 10.0, t.accent_soft);
+                        icons::paint(ui.painter(), rect.shrink(11.0), Icon::Play, t.accent);
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new("UP NEXT").size(11.0).strong().color(t.accent));
+                            ui.label(RichText::new(&l.title).size(17.0).strong().color(strong(t)));
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if accent_button(ui, t, "Continue").clicked() {
+                                open = Some(l.id.clone());
+                            }
+                            ui.label(
+                                RichText::new(format!("{} · ~{} min", self.catalog.module_title(&l), l.minutes))
+                                    .color(t.muted),
+                            );
+                        });
+                    });
+                });
+                ui.add_space(18.0);
+            }
+            let cols = if width > 1050.0 { 3 } else { 2 };
+            for track in self.catalog.tracks.clone() {
+                let (d, n) = self.progress.track_counts(&self.catalog, &track.id);
+                let minutes: u32 =
+                    track.lessons.iter().filter_map(|id| self.catalog.lesson(id)).map(|l| l.minutes).sum();
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(&track.title).size(21.0).strong().color(strong(t)));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(format!("{d}/{n} lessons · about {} h", (minutes + 30) / 60)).color(t.muted),
+                        );
+                    });
+                });
+                ui.label(RichText::new(&track.summary).color(t.muted));
+                ui.add_space(4.0);
+                let w = ui.available_width();
+                theme::bar(ui, t, if n == 0 { 0.0 } else { d as f32 / n as f32 }, w, t.accent);
+                ui.add_space(12.0);
+                let modules: Vec<_> = track
+                    .modules
+                    .iter()
+                    .filter(|m| {
+                        track.lessons.iter().any(|id| self.catalog.lesson(id).is_some_and(|l| l.module == m.id))
+                    })
+                    .cloned()
+                    .collect();
+                for row in modules.chunks(cols) {
+                    ui.columns(cols, |columns| {
+                        for (module, col) in row.iter().zip(columns.iter_mut()) {
+                            let lessons: Vec<poddojo_core::Lesson> = track
+                                .lessons
+                                .iter()
+                                .filter_map(|id| self.catalog.lesson(id))
+                                .filter(|l| l.module == module.id)
+                                .cloned()
+                                .collect();
+                            if let Some(id) = self.module_card(col, t, module, &lessons) {
+                                open = Some(id);
+                            }
+                        }
+                    });
+                    ui.add_space(12.0);
+                }
+                ui.add_space(14.0);
+            }
+        });
+        if let Some(id) = open {
+            self.open_lesson(&id);
+        }
+    }
+
+    fn module_card(
+        &self,
+        ui: &mut egui::Ui,
+        t: &Tokens,
+        module: &poddojo_core::Module,
+        lessons: &[Lesson],
+    ) -> Option<String> {
+        let mut open = None;
+        let done = lessons.iter().filter(|l| self.progress.is_done(l)).count();
+        theme::card(t).inner_margin(Margin::same(16)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                ui.label(RichText::new(&module.title).size(15.5).strong().color(strong(t)));
+            });
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!("{done}/{} done", lessons.len()))
+                        .size(12.0)
+                        .color(if done == lessons.len() { t.good } else { t.muted }),
                 );
-                if let Some(l) = self.progress.resume(&self.catalog).cloned()
-                    && accent_button(ui, &t, &format!("▶  Continue: {}", l.title)).clicked()
-                {
-                    self.open_lesson(&l.id);
+            });
+            if !module.summary.is_empty() {
+                ui.label(RichText::new(&module.summary).size(12.5).color(t.muted));
+            }
+            ui.add_space(6.0);
+            for l in lessons {
+                let status = self.progress.status(l);
+                if lesson_row_minutes(ui, t, &l.title, status, l.minutes).clicked() {
+                    open = Some(l.id.clone());
                 }
             }
         });
+        open
     }
 
     // -------------------------------------------------------------------------------------------
@@ -71,6 +204,12 @@ impl App {
 
     fn lesson_tree(&mut self, ui: &mut egui::Ui, t: &Tokens) {
         let mut open = None;
+        if icons::button(ui, Icon::Book, "All lessons").on_hover_text("The syllabus: every track and module").clicked()
+        {
+            self.learn = LearnState::default();
+            return;
+        }
+        ui.add_space(6.0);
         egui::Frame::new()
             .fill(t.card_hover.gamma_multiply(0.5))
             .stroke(Stroke::new(1.0, t.border))
@@ -475,8 +614,12 @@ impl App {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(format!("{done} of {n} steps")).strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let (dot, text) =
-                        if self.learn.prepared { (t.good, "lab ready") } else { (t.muted, "not prepared yet") };
+                    let prepared_at = self.progress.lesson(&l.id).and_then(|p| p.prepared_at);
+                    let (dot, text) = match (self.learn.prepared, prepared_at) {
+                        (_, Some(ts)) => (t.good, format!("prepared {}", super::ago(ts))),
+                        (true, None) => (t.good, "lab ready".to_string()),
+                        (false, None) => (t.muted, "not prepared yet".to_string()),
+                    };
                     ui.label(RichText::new(text).size(12.0).color(dot));
                     let (r, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
                     ui.painter().circle_filled(r.center(), 4.0, dot);
@@ -623,6 +766,8 @@ impl App {
                             && ui.button(format!("Hint {}/{}", shown + 1, step.hints.len())).clicked()
                         {
                             self.learn.hints.insert(i, shown + 1);
+                            self.progress.record_hints(l, i, shown + 1);
+                            self.save_progress();
                         }
                         if !step.solution.is_empty() {
                             let showing = self.learn.solutions.contains(&i);
@@ -795,4 +940,37 @@ fn chevron(ui: &mut egui::Ui, t: &Tokens, open: bool) {
         vec![c + egui::vec2(-2.0, -4.0), c + egui::vec2(2.5, 0.0), c + egui::vec2(-2.0, 4.0)]
     };
     ui.painter().add(egui::Shape::line(pts, Stroke::new(1.6, t.muted)));
+}
+
+/// A lesson in a module card: status dot, title and minutes.
+fn lesson_row_minutes(
+    ui: &mut egui::Ui,
+    t: &Tokens,
+    title: &str,
+    status: LessonStatus,
+    minutes: u32,
+) -> egui::Response {
+    let width = ui.available_width();
+    let galley = ui.painter().layout(title.to_string(), egui::FontId::proportional(14.0), t.text, width - 80.0);
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, galley.size().y + 14.0), egui::Sense::click());
+    let p = ui.painter();
+    if resp.hovered() {
+        p.rect_filled(rect, 8.0, t.card_hover);
+    }
+    paint_status(
+        p,
+        t,
+        egui::Rect::from_center_size(egui::pos2(rect.min.x + 12.0, rect.min.y + 7.0 + 9.0), egui::vec2(14.0, 14.0)),
+        status,
+    );
+    let color = if status == LessonStatus::Done { t.muted } else { t.text };
+    p.galley_with_override_text_color(egui::pos2(rect.min.x + 28.0, rect.min.y + 7.0), galley, color);
+    p.text(
+        egui::pos2(rect.max.x - 8.0, rect.min.y + 16.0),
+        egui::Align2::RIGHT_CENTER,
+        format!("{minutes} min"),
+        egui::FontId::proportional(12.0),
+        t.muted,
+    );
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }

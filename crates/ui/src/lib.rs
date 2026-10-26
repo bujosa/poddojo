@@ -19,6 +19,7 @@ use poddojo_core::{Catalog, CheckResult, ExamAttempt, Progress, now};
 use poddojo_runner::cluster::{self, ClusterRecord, Status};
 use poddojo_runner::doctor::Tool;
 use poddojo_runner::explore::{KubeObject, Layer, Row};
+use poddojo_runner::profiles::{self, Profile, Profiles};
 use poddojo_runner::targets::{self, EngineInfo, Target};
 use poddojo_runner::{LabEnv, Paths, Settings};
 
@@ -29,6 +30,7 @@ use theme::Tokens;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
+    Welcome,
     Home,
     Learn,
     Docker,
@@ -116,6 +118,15 @@ pub struct KubeState {
 }
 
 #[derive(Default)]
+pub struct WelcomeState {
+    /// Each profile's progress, read when the welcome screen opens.
+    pub loaded: Option<Vec<(Profile, Progress)>>,
+    pub new_name: String,
+    pub creating: bool,
+    pub confirm_remove: Option<String>,
+}
+
+#[derive(Default)]
 pub struct ExamState {
     pub task: usize,
     pub result: Option<ExamAttempt>,
@@ -133,6 +144,10 @@ pub struct Drill {
 }
 
 pub struct App {
+    pub profiles: Profiles,
+    /// Who is studying; `None` while the welcome screen is shown.
+    pub profile: Option<Profile>,
+    pub welcome: WelcomeState,
     /// Lesson list filter on the Learn page.
     pub tree_filter: String,
     pub paths: Paths,
@@ -178,24 +193,7 @@ impl App {
             Ok(c) => (c, Vec::new()),
             Err(errs) => (Catalog::default(), errs.iter().map(|e| e.to_string()).collect()),
         };
-        let mut startup_toast = None;
-        let progress = match Progress::load(&paths.progress()) {
-            Ok(p) => p,
-            Err(e) => {
-                // Keep the unreadable file instead of overwriting it with an empty history.
-                let backup = paths.root.join(format!("progress.json.unreadable-{}", now()));
-                let kept = std::fs::copy(paths.progress(), &backup).is_ok();
-                startup_toast = Some(format!(
-                    "Your progress file could not be read ({e}). {}",
-                    if kept {
-                        format!("A copy was kept at {}.", backup.display())
-                    } else {
-                        "It was left untouched.".into()
-                    }
-                ));
-                Progress::default()
-            }
-        };
+        let profiles = Profiles::load(&paths);
         let t = Tokens::get(settings.dark);
         theme::apply(ctx, &t, settings.zoom);
         let cluster_record = ClusterRecord::load(&paths);
@@ -205,8 +203,11 @@ impl App {
             settings,
             catalog,
             content_errors,
-            progress,
-            page: Page::Home,
+            progress: Progress::default(),
+            profiles,
+            profile: None,
+            welcome: WelcomeState::default(),
+            page: Page::Welcome,
             t,
             jobs: Jobs::default(),
             console: Console::default(),
@@ -230,17 +231,63 @@ impl App {
             setup_probed: false,
             shot: std::env::var_os("PODDOJO_SCREENSHOT").map(|p| (std::path::PathBuf::from(p), Instant::now(), false)),
         };
+        // Development aid: `PODDOJO_PROFILE=<id|name|guest>` skips the welcome screen.
+        if let Ok(who) = std::env::var("PODDOJO_PROFILE") {
+            let profile =
+                if who == profiles::GUEST { Some(Profile::guest()) } else { app.profiles.find(&who).cloned() };
+            if let Some(p) = profile {
+                app.enter(p);
+            }
+        }
         if let Ok(page) = std::env::var("PODDOJO_PAGE") {
             app.goto(&page);
         }
-        app.progress_stamp = progress_mtime(&app.paths);
-        if let Some(t) = startup_toast {
-            app.toast(t, false);
-        }
-        if app.progress.active_exam.is_some() {
-            app.page = Page::Exams;
-        }
         app
+    }
+
+    /// Start studying as `profile`: load its progress and open Home (or the exam in progress).
+    pub fn enter(&mut self, profile: Profile) {
+        if self.profile.is_some() {
+            self.save_progress();
+        }
+        self.paths = if profile.is_guest() { self.profiles.start_guest() } else { self.profiles.paths_for(&profile) };
+        let _ = self.profiles.set_last(&profile.id);
+        self.progress = match Progress::load(&self.paths.progress()) {
+            Ok(p) => p,
+            Err(e) => {
+                // Keep the unreadable file instead of overwriting it with an empty history.
+                let backup = self.paths.profile_dir().join(format!("progress.json.unreadable-{}", now()));
+                let kept = std::fs::copy(self.paths.progress(), &backup).is_ok();
+                self.toast(
+                    format!(
+                        "Your progress file could not be read ({e}). {}",
+                        if kept {
+                            format!("A copy was kept at {}.", backup.display())
+                        } else {
+                            "It was left untouched.".into()
+                        }
+                    ),
+                    false,
+                );
+                Progress::default()
+            }
+        };
+        self.progress_stamp = progress_mtime(&self.paths);
+        self.learn = LearnState::default();
+        self.exam = ExamState::default();
+        self.page = if self.progress.active_exam.is_some() { Page::Exams } else { Page::Home };
+        if profile.is_guest() {
+            self.toast("Guest mode: practise freely, nothing is kept for next time", true);
+        }
+        self.profile = Some(profile);
+    }
+
+    /// Back to the welcome screen to pick someone else.
+    pub fn switch_profile(&mut self) {
+        self.save_progress();
+        self.profile = None;
+        self.welcome = WelcomeState::default();
+        self.page = Page::Welcome;
     }
 
     // ---------------------------------------------------------------------------------------
@@ -274,6 +321,9 @@ impl App {
     }
 
     pub fn save_progress(&mut self) {
+        if self.profile.is_none() {
+            return;
+        }
         if let Err(e) = self.progress.save(&self.paths.progress()) {
             self.toast(format!("Could not save progress: {e}"), false);
         }
@@ -282,6 +332,9 @@ impl App {
 
     /// Pick up progress written by the CLI (or another window) since we last looked.
     fn sync_progress(&mut self) {
+        if self.profile.is_none() {
+            return;
+        }
         let stamp = progress_mtime(&self.paths);
         if stamp.is_some() && stamp != self.progress_stamp {
             if let Ok(p) = Progress::load(&self.paths.progress()) {
@@ -331,7 +384,15 @@ impl App {
             return;
         }
         let Some(env) = self.env_for("cluster") else { return };
-        self.jobs.spawn(ctx, "cluster status", move |_| Done::Cluster(cluster::status(&env)));
+        let paths = self.paths.clone();
+        let target = self.target_name();
+        self.jobs.spawn(ctx, "cluster status", move |_| {
+            let status = cluster::status(&env);
+            if status == Status::Missing && cluster::adopt_existing(&env, &paths, &target) {
+                return Done::Cluster(cluster::status(&env));
+            }
+            Done::Cluster(status)
+        });
     }
 
     pub fn select_target(&mut self, ctx: &egui::Context, name: &str) {
@@ -377,12 +438,21 @@ impl App {
             Done::Engine { target, info } => {
                 self.engine.insert(target, info);
             }
-            Done::Cluster(s) => self.cluster = Some(s),
+            Done::Cluster(s) => {
+                if s.is_running() && self.cluster_record.is_none() {
+                    self.cluster_record = ClusterRecord::load(&self.paths);
+                }
+                self.cluster = Some(s);
+            }
             Done::Console { entry, out } => self.console.finish(entry, out),
             Done::Prepared { lesson, ok, log } => {
                 if self.learn.lesson.as_deref() == Some(lesson.as_str()) {
                     self.learn.lab_log = log;
                     self.learn.prepared = ok;
+                }
+                if ok && let Some(l) = self.catalog.lesson(&lesson).cloned() {
+                    self.progress.record_prepared(&l, now());
+                    self.save_progress();
                 }
                 self.toast(
                     if ok {
@@ -409,6 +479,7 @@ impl App {
                 if let Some(l) = self.catalog.lesson(&lesson).cloned() {
                     let was_done = self.progress.is_done(&l);
                     self.progress.record_step(&l, step, passed, now());
+                    self.progress.record_results(&l, step, results.clone());
                     self.save_progress();
                     if !was_done && self.progress.is_done(&l) {
                         self.toast(format!("🥋 Lesson complete: {}", l.title), true);
@@ -567,6 +638,9 @@ impl App {
 
     /// ⌘1–⌘7 switch pages, ⌘J toggles the console, ⌘T opens a real terminal.
     fn shortcuts(&mut self, ctx: &egui::Context) {
+        if self.profile.is_none() {
+            return;
+        }
         let (page, console, terminal) = ctx.input_mut(|i| {
             let mut page = None;
             for (n, key) in [
@@ -804,6 +878,12 @@ impl App {
                     }
                 }
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+                    if let Some(p) = self.profile.clone()
+                        && profile_chip(ui, &t, &p).on_hover_text("Switch profile").clicked()
+                    {
+                        self.switch_profile();
+                    }
+                    ui.add_space(8.0);
                     let (done, total) = self.progress.done_count(&self.catalog);
                     ui.label(RichText::new(format!("{done}/{total} lessons")).size(12.0).color(t.muted));
                     theme::bar(ui, &t, if total == 0 { 0.0 } else { done as f32 / total as f32 }, 148.0, t.accent);
@@ -862,6 +942,20 @@ impl App {
             self.handle(&ctx, done);
         }
         self.tick_study_time();
+        if self.profile.is_none() {
+            let t = self.t;
+            egui::CentralPanel::default()
+                .frame(egui::Frame::new().fill(t.bg).inner_margin(egui::Margin::same(24)))
+                .show(ui, |ui| {
+                    self.welcome_page(ui);
+                });
+            self.toasts(&ctx);
+            self.screenshot(&ctx);
+            if !self.jobs.running.is_empty() {
+                ctx.request_repaint_after(Duration::from_millis(150));
+            }
+            return;
+        }
         self.top_bar(ui);
         self.nav(ui);
         if self.console.open && !self.in_workspace() {
@@ -894,7 +988,7 @@ impl App {
                     });
                 }
                 match self.page {
-                    Page::Home => self.home(ui),
+                    Page::Welcome | Page::Home => self.home(ui),
                     Page::Learn => self.learn_page(ui),
                     Page::Docker => self.docker_page(ui),
                     Page::Cluster => self.cluster_page(ui),
@@ -956,5 +1050,54 @@ fn nav_item(ui: &mut egui::Ui, t: &Tokens, icon: Icon, label: &str, selected: bo
         );
     }
     ui.add_space(2.0);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Avatar colours for profiles.
+pub const AVATARS: [Color32; 8] = [
+    Color32::from_rgb(45, 212, 191),
+    Color32::from_rgb(129, 140, 248),
+    Color32::from_rgb(251, 146, 60),
+    Color32::from_rgb(244, 114, 182),
+    Color32::from_rgb(56, 189, 248),
+    Color32::from_rgb(163, 230, 53),
+    Color32::from_rgb(250, 204, 21),
+    Color32::from_rgb(148, 163, 184),
+];
+
+/// A round avatar with the profile's initials.
+pub fn avatar(ui: &mut egui::Ui, p: &Profile, size: f32) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    let color = AVATARS.get(p.color as usize % AVATARS.len()).copied().unwrap_or(Color32::GRAY);
+    ui.painter().circle_filled(rect.center(), size / 2.0, color);
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        p.initials(),
+        egui::FontId::proportional(size * 0.38),
+        Color32::from_rgb(10, 14, 30),
+    );
+    resp
+}
+
+/// The current learner at the bottom of the navigation; click to switch.
+fn profile_chip(ui: &mut egui::Ui, t: &Tokens, p: &Profile) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 44.0), egui::Sense::click());
+    if resp.hovered() {
+        ui.painter().rect_filled(rect, 10.0, t.card);
+    }
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect.shrink2(egui::vec2(8.0, 6.0)))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    avatar(&mut child, p, 30.0);
+    child.vertical(|ui| {
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+        ui.label(RichText::new(&p.name).size(13.5).strong().color(t.text));
+        ui.label(
+            RichText::new(if p.is_guest() { "Guest · not saved" } else { "Switch profile" }).size(11.0).color(t.muted),
+        );
+    });
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }

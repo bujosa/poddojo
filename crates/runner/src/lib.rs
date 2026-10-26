@@ -12,11 +12,13 @@ pub mod exec;
 pub mod explore;
 pub mod lab;
 pub mod paths;
+pub mod profiles;
 pub mod settings;
 pub mod targets;
 pub mod terminal;
 
 pub use exec::{LabEnv, run};
 pub use paths::Paths;
+pub use profiles::{Profile, Profiles};
 pub use settings::Settings;
 pub use targets::Target;

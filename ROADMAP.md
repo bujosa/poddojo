@@ -5,6 +5,8 @@
 `dojo verify`.
 
 ## Done
+- Profiles: a welcome screen ("Who's training today?"), several learners per computer, guest
+  mode, resumable lab sessions (prepared state, hints, last checks), labs in progress on Home.
 - Workspace: lab steps beside a terminal pane; exam workspace with timer, flags and terminal.
 - Polished UI: icons drawn in code, quiz answer cards, progress rings, searchable lessons,
   shortcuts, light and dark themes; macOS app bundle (`cargo xtask bundle --install`).

@@ -7,6 +7,7 @@ mod home;
 mod learn;
 mod progress;
 mod setup;
+mod welcome;
 
 use egui::RichText;
 
