@@ -15,7 +15,7 @@ objectives = [
 
 [[quiz]]
 q = "What does a CPU request of 250m mean?"
-choices = ["250 CPUs", "One quarter of a CPU", "250 MiB of memory", "A maximum runtime of 250 minutes"]
+choices = ["A quarter of the node's CPU", "One quarter of a CPU", "250 MiB of memory", "A hard cap of a quarter CPU"]
 answer = 1
 why = "1000 millicores equals one CPU. The scheduler accounts for a 250m request when placing the Pod; this request is not itself a hard usage cap. A separate CPU limit controls throttling."
 
@@ -27,19 +27,19 @@ why = "For this container-level case, every container, including init containers
 
 [[quiz]]
 q = "A Linux container repeatedly exceeds its CPU limit. What normally happens?"
-choices = ["It is OOMKilled", "The scheduler deletes its namespace", "Its CPU execution is throttled", "Its memory limit doubles"]
+choices = ["It is OOMKilled", "The kubelet restarts it", "Its CPU execution is throttled", "It is evicted from the node"]
 answer = 2
 why = "CPU is compressible: the kernel can delay execution. Memory exhaustion may instead trigger an OOM kill. CPU throttling can still cause latency and probe failures without directly terminating the process."
 
 [[quiz]]
 q = "A quota tracks requests.cpu and requests.memory. A new Pod supplies neither, and there are no defaults. What happens?"
-choices = ["It is always BestEffort and bypasses quota", "Admission rejects it for missing resource declarations", "The quota chooses the smallest node", "It silently gets the full namespace budget"]
+choices = ["It is always BestEffort and bypasses quota", "Admission rejects it for missing resource declarations", "It is admitted and counted as zero", "The quota assigns it the namespace's average request"]
 answer = 1
 why = "Compute quota needs resource declarations to account for new Pods. Explicit requests, limit-to-request defaulting, or LimitRange defaults can supply them. A quota tracking only object counts does not impose this particular compute requirement."
 
 [[quiz]]
 q = "What changes when a LimitRange is added after Pods already exist?"
-choices = ["All running Pods immediately receive its defaults", "It influences newly admitted objects; existing Pods are not retroactively rewritten", "Existing Pods restart", "All resource quotas are removed"]
+choices = ["All running Pods immediately receive its defaults", "It influences newly admitted objects; existing Pods are not retroactively rewritten", "Existing Pods restart", "Existing Pods that violate it are evicted"]
 answer = 1
 why = "LimitRange admission defaults and validates new requests. It does not resize or restart existing Pods, so inspect the admitted resource fields rather than assuming all Pods in a namespace share today's policy."
 

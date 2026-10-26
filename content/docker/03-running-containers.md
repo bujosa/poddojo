@@ -8,31 +8,31 @@ objectives = ["Choose run flags for services and one-shot commands", "Reach a pu
 
 [[quiz]]
 q = "What does -p 18080:80 publish?"
-choices = ["Container port 18080 on host port 80", "Port 80 only inside the container", "Host port 18080 to container port 80", "Every container port on the host"]
+choices = ["Container port 18080 on host port 80", "Port 80 only inside the container", "Host port 18080 to container port 80", "Host port 18080 to container port 80, on 127.0.0.1 only"]
 answer = 2
 why = "The order is host:container. The process must listen on the container port and a reachable interface; EXPOSE alone would not publish anything."
 
 [[quiz]]
 q = "What does docker exec do?"
-choices = ["Starts an additional process inside a running container", "Replaces PID 1 permanently", "Starts a stopped container", "Changes the image default command"]
+choices = ["Starts an additional process inside a running container", "Attaches your terminal to the container's existing PID 1", "Starts a stopped container", "Creates a new container from the same image and runs the command"]
 answer = 0
 why = "exec starts another process sharing the running container environment and namespaces. It neither changes the image nor restarts the main application."
 
 [[quiz]]
 q = "Why avoid --rm for a container whose failed startup you need to investigate?"
-choices = ["It disables logs", "It removes the base image", "It prevents detached operation", "It removes the container after exit, including its inspectable state"]
+choices = ["It stops `docker logs` from working while the container runs", "It removes the image as well when the container exits", "It prevents detached operation", "It removes the container after exit, including its inspectable state"]
 answer = 3
 why = "Automatic removal is useful for disposable commands, but the stopped object disappears. Without --rm you can inspect its exit code and logs after failure."
 
 [[quiz]]
 q = "Which command returns the last 20 log lines and then follows new output?"
-choices = ["docker exec dojo-web logs", "docker logs --tail 20 -f dojo-web", "docker ps --tail 20 dojo-web", "docker logs --since 20 dojo-web"]
+choices = ["docker logs -n 20 dojo-web", "docker logs --tail 20 -f dojo-web", "docker logs --tail 20 --timestamps dojo-web", "docker logs --since 20 dojo-web"]
 answer = 1
 why = "--tail bounds the initial history, while -f streams subsequent output. --since instead selects logs using a timestamp or duration, such as 5m."
 
 [[quiz]]
 q = "What happens when you run docker start on a stopped container?"
-choices = ["Docker builds its Dockerfile again", "Docker replaces it with the newest tag from the registry", "The existing container starts with its existing creation settings", "Docker deletes its writable layer"]
+choices = ["Docker creates a fresh container from the same image", "Docker replaces it with the newest tag from the registry", "The existing container starts with its existing creation settings", "The container starts with an empty writable layer"]
 answer = 2
 why = "start reuses the object, configuration and writable layer. Changing an environment variable or port mapping normally requires recreating the container."
 

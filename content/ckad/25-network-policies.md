@@ -21,13 +21,13 @@ why = "A peer podSelector alone is limited to the namespace containing the polic
 
 [[quiz]]
 q = "How do namespaceSelector and podSelector in one from list entry combine?"
-choices = ["OR", "AND", "The podSelector is ignored", "The namespaceSelector is ignored"]
+choices = ["OR", "AND", "OR, but only for the listed ports", "The namespaceSelector applies only to egress"]
 answer = 1
 why = "Both restrictions must match in the same peer. Writing two separate list entries changes the meaning to either peer, often allowing much more traffic than intended."
 
 [[quiz]]
 q = "Why can an HTTP request by IP work after egress isolation while the same request by name fails?"
-choices = ["Services never support egress policies", "DNS traffic may not be allowed", "NetworkPolicies rewrite DNS names", "TCP 80 automatically allows DNS"]
+choices = ["Egress rules apply only to Service IPs, not Pod IPs", "DNS traffic may not be allowed", "Name lookups go through kube-proxy, which the policy blocks", "TCP 80 automatically allows DNS"]
 answer = 1
 why = "Name resolution is separate traffic, usually UDP 53 with TCP 53 also needed. Allow the DNS destination and both protocols, as well as application traffic."
 
@@ -39,7 +39,7 @@ why = "An empty label selector matches all Pods within the policy namespace. pol
 
 [lab]
 summary = "Build default-deny boundaries, permit a precise frontend, then restore constrained DNS and application egress."
-setup = ["kubectl create namespace policies-lab --dry-run=client -o yaml | kubectl apply -f -", "kubectl create namespace policies-other-lab --dry-run=client -o yaml | kubectl apply -f -", "kubectl -n policies-lab run backend --image=nginx:1.27-alpine --labels=app=backend --port=80 --dry-run=client -o yaml | kubectl apply -f -", "kubectl -n policies-lab wait --for=condition=Ready pod/backend --timeout=120s", "kubectl -n policies-lab run client --image=busybox:1.36 --restart=Never --labels=role=frontend --dry-run=client -o yaml --command -- sleep 14400 | kubectl apply -f -\nkubectl -n policies-lab wait --for=condition=Ready pod/client --timeout=120s", "kubectl -n policies-lab run observer --image=busybox:1.36 --restart=Never --labels=role=observer --dry-run=client -o yaml --command -- sleep 14400 | kubectl apply -f -\nkubectl -n policies-lab wait --for=condition=Ready pod/observer --timeout=120s", "kubectl -n policies-other-lab run outsider --image=busybox:1.36 --restart=Never --labels=role=frontend --dry-run=client -o yaml --command -- sleep 14400 | kubectl apply -f -\nkubectl -n policies-other-lab wait --for=condition=Ready pod/outsider --timeout=120s", "kubectl apply -f - <<'EOF'\napiVersion: v1\nkind: Service\nmetadata:\n  name: backend\n  namespace: policies-lab\nspec:\n  type: ClusterIP\n  selector: {app: backend}\n  ports:\n  - name: http\n    port: 80\n    targetPort: 80\nEOF", "kubectl -n policies-lab exec client -- wget -qO- -T 2 http://backend"]
+setup = ["kubectl create namespace policies-lab --dry-run=client -o yaml | kubectl apply -f -", "kubectl create namespace policies-other-lab --dry-run=client -o yaml | kubectl apply -f -", "kubectl -n policies-lab run backend --image=nginx:1.27-alpine --labels=app=backend --port=80 --dry-run=client -o yaml | kubectl apply -f -", "kubectl -n policies-lab wait --for=condition=Ready pod/backend --timeout=120s", "kubectl -n policies-lab run client --image=busybox:1.36 --restart=Never --labels=role=frontend --dry-run=client -o yaml --command -- sleep 14400 | kubectl apply -f -\nkubectl -n policies-lab wait --for=condition=Ready pod/client --timeout=120s", "kubectl -n policies-lab run observer --image=busybox:1.36 --restart=Never --labels=role=observer --dry-run=client -o yaml --command -- sleep 14400 | kubectl apply -f -\nkubectl -n policies-lab wait --for=condition=Ready pod/observer --timeout=120s", "kubectl -n policies-other-lab run outsider --image=busybox:1.36 --restart=Never --labels=role=frontend --dry-run=client -o yaml --command -- sleep 14400 | kubectl apply -f -\nkubectl -n policies-other-lab wait --for=condition=Ready pod/outsider --timeout=120s", "kubectl apply -f - <<'EOF'\napiVersion: v1\nkind: Service\nmetadata:\n  name: backend\n  namespace: policies-lab\nspec:\n  type: ClusterIP\n  selector: {app: backend}\n  ports:\n  - name: http\n    port: 80\n    targetPort: 80\nEOF", "kubectl -n policies-lab exec client -- wget -qO- -T 2 http://backend", "kubectl -n policies-other-lab run elsewhere --image=nginx:1.27-alpine --labels=app=elsewhere --port=80 --dry-run=client -o yaml | kubectl apply -f -\nkubectl -n policies-other-lab wait --for=condition=Ready pod/elsewhere --timeout=120s"]
 cleanup = ["kubectl delete namespace policies-lab policies-other-lab --ignore-not-found --wait=false || true"]
 
 [[lab.steps]]
@@ -107,6 +107,62 @@ equals = '''blocked
 blocked'''
 timeout = 180
 
+[[lab.steps.negatives]]
+name = "lists the namespace and the label as two peers (OR), admitting the observer"
+run = '''
+kubectl apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-frontend, namespace: policies-lab}
+spec:
+  podSelector: {matchLabels: {app: backend}}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: policies-lab}}
+    - podSelector: {matchLabels: {role: frontend}}
+    ports:
+    - {protocol: TCP, port: 80}
+EOF
+'''
+
+[[lab.steps.negatives]]
+name = "matches role=frontend in every namespace, admitting the outsider"
+run = '''
+kubectl apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-frontend, namespace: policies-lab}
+spec:
+  podSelector: {matchLabels: {app: backend}}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector: {}
+      podSelector: {matchLabels: {role: frontend}}
+    ports:
+    - {protocol: TCP, port: 80}
+EOF
+'''
+
+[[lab.steps.alternatives]]
+name = "a podSelector-only peer (it already means this namespace)"
+run = '''
+kubectl apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-frontend, namespace: policies-lab}
+spec:
+  podSelector: {matchLabels: {app: backend}}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector: {matchLabels: {role: frontend}}
+    ports:
+    - {protocol: TCP, port: 80}
+EOF
+'''
+
 [[lab.steps]]
 title = "Isolate the frontend egress independently"
 task = "Create NetworkPolicy deny-client-egress selecting role=frontend in policies-lab, policyTypes [Egress], with no allowed egress rules. Even the authorized frontend must now fail to reach backend by IP."
@@ -136,7 +192,7 @@ timeout = 120
 
 [[lab.steps]]
 title = "Restore DNS and the application path"
-task = "Create NetworkPolicy allow-client-egress for role=frontend in policies-lab. Allow UDP and TCP 53 only to kube-system Pods labeled k8s-app=kube-dns, and TCP 80 only to app=backend Pods in policies-lab. Keep all earlier policies. Retrieve http://backend.policies-lab.svc.cluster.local from client."
+task = "Create NetworkPolicy allow-client-egress for role=frontend in policies-lab. Allow UDP and TCP 53 only to kube-system Pods labeled k8s-app=kube-dns, and TCP 80 only to app=backend Pods in policies-lab. Keep all earlier policies. Retrieve http://backend.policies-lab.svc.cluster.local from client; other destinations, such as the web server in policies-other-lab, must stay unreachable."
 solution = '''```bash
 kubectl apply -f - <<'EOF'
 apiVersion: networking.k8s.io/v1
@@ -173,9 +229,66 @@ equals = "ok"
 timeout = 120
 
 [[lab.steps.checks]]
-name = "DNS rule permits both DNS transports to the selected namespace"
-run = '''v=$(kubectl -n policies-lab get networkpolicy allow-client-egress -o jsonpath='{.spec.egress[*].ports[*].protocol}'); echo "$v" | grep -q UDP && echo "$v" | grep -q TCP && kubectl -n policies-lab get networkpolicy allow-client-egress -o jsonpath='{.spec.egress[*].to[*].namespaceSelector.matchLabels.kubernetes\.io/metadata\.name}''''
+name = "port 53 is open over both UDP and TCP, only towards kube-system"
+run = '''v=$(kubectl -n policies-lab get networkpolicy allow-client-egress -o jsonpath='{.spec.egress[*].ports[?(@.port==53)].protocol}'); echo "$v" | grep -q UDP && echo "$v" | grep -q TCP && kubectl -n policies-lab get networkpolicy allow-client-egress -o jsonpath='{.spec.egress[*].to[*].namespaceSelector.matchLabels.kubernetes\.io/metadata\.name}''''
 equals = "kube-system"
+
+[[lab.steps.checks]]
+name = "the client still cannot reach other web servers"
+run = '''ip=$(kubectl -n policies-other-lab get pod elsewhere -o jsonpath='{.status.podIP}'); [ -n "$ip" ] || exit 1
+kubectl -n policies-lab get networkpolicy allow-client-egress >/dev/null || exit 1
+for i in $(seq 1 15); do
+  if kubectl -n policies-lab exec client -- wget -qO- -T 2 "http://$ip" >/dev/null 2>&1; then sleep 2; else echo blocked; exit 0; fi
+done; echo "client reaches $ip in policies-other-lab"'''
+equals = "blocked"
+timeout = 90
+
+[[lab.steps.negatives]]
+name = "allows TCP 80 to any destination instead of only the backend"
+run = '''
+kubectl apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-client-egress, namespace: policies-lab}
+spec:
+  podSelector: {matchLabels: {role: frontend}}
+  policyTypes: [Egress]
+  egress:
+  - to:
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+      podSelector: {matchLabels: {k8s-app: kube-dns}}
+    ports:
+    - {protocol: UDP, port: 53}
+    - {protocol: TCP, port: 53}
+  - ports:
+    - {protocol: TCP, port: 80}
+EOF
+sleep 2
+'''
+
+[[lab.steps.negatives]]
+name = "allows only UDP DNS"
+run = '''
+kubectl apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-client-egress, namespace: policies-lab}
+spec:
+  podSelector: {matchLabels: {role: frontend}}
+  policyTypes: [Egress]
+  egress:
+  - to:
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+      podSelector: {matchLabels: {k8s-app: kube-dns}}
+    ports:
+    - {protocol: UDP, port: 53}
+  - to:
+    - podSelector: {matchLabels: {app: backend}}
+    ports:
+    - {protocol: TCP, port: 80}
+EOF
+sleep 2
+'''
 +++
 
 ## Isolation is a change to the default

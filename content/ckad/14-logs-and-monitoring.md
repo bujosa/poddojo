@@ -9,31 +9,31 @@ objectives = ["Select current and previous container logs efficiently", "Correla
 
 [[quiz]]
 q = "What does kubectl logs --previous retrieve?"
-choices = ["All deleted Pod logs in the namespace", "The preceding terminated instance of the selected container in the same Pod", "Only logs older than one hour", "The previous Deployment revision"]
+choices = ["All deleted Pod logs in the namespace", "The preceding terminated instance of the selected container in the same Pod", "Logs of the Pod its ReplicaSet replaced", "The logs written before the last log rotation"]
 answer = 1
 why = "The kubelet can expose the previous container instance after a restart. It is not a durable archive of deleted Pods or every historical restart."
 
 [[quiz]]
 q = "Why might kubectl logs -l app=dojo-stream show less history than expected?"
-choices = ["Selectors disable logs", "Selector-based logs default to a limited tail unless overridden", "It reads only events", "It always filters to errors"]
+choices = ["Selector logs read only Pods that are Ready", "Selector-based logs default to a limited tail unless overridden", "Selector logs skip Pods older than one hour", "Selector logs show only the newest Pod"]
 answer = 1
 why = "Specify --tail explicitly, such as --tail=100 or --tail=-1, when selecting multiple Pods. Also choose containers deliberately and use --prefix to identify the source."
 
 [[quiz]]
 q = "What does a 100m CPU usage reading mean?"
-choices = ["One hundred CPU cores", "One tenth of a CPU core averaged over the sampling window", "A 100 MiB memory limit", "One hundred percent of any limit"]
+choices = ["One hundred CPU cores", "One tenth of a CPU core averaged over the sampling window", "One tenth of the container's CPU request", "Ten percent of the node's total CPU"]
 answer = 1
 why = "CPU is reported in millicores: 1000m equals one core. Usage is measured activity, distinct from the request used for scheduling and the configured limit."
 
 [[quiz]]
 q = "What should you first infer from Metrics API not available?"
-choices = ["The application must have crashed", "The cluster may lack a working metrics-server or aggregated metrics API", "The Pod has no labels", "CPU requests are zero"]
+choices = ["The Pod has no resource requests set", "The cluster may lack a working metrics-server or aggregated metrics API", "kubectl lacks the top plugin", "Your user lacks RBAC permission to read Pods"]
 answer = 1
 why = "Metrics collection is an optional cluster capability. Check discovery, APIService health, metrics-server Pods, certificates, and permissions before interpreting absent data as application behavior."
 
 [[quiz]]
 q = "Which selector finds only events for one named Pod?"
-choices = ["-l pod=NAME always works", "--field-selector involvedObject.kind=Pod,involvedObject.name=NAME on get events", "--all-containers", "--since=Pod/NAME"]
+choices = ["-l pod=NAME always works", "--field-selector involvedObject.kind=Pod,involvedObject.name=NAME on get events", "--field-selector metadata.name=NAME on get events", "-l involvedObject.name=NAME on get events"]
 answer = 1
 why = "Field selectors target supported API fields. Event involvedObject fields differ from arbitrary labels, and supported selectors vary by resource kind."
 

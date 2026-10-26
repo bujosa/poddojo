@@ -15,7 +15,7 @@ objectives = [
 
 [[quiz]]
 q = "What happens immediately after installing a CRD for backups, without a controller?"
-choices = ["Kubernetes starts taking database backups", "The API can store and validate backup objects, but no backup behavior is implemented", "Every Pod gains a backup sidecar", "The scheduler creates a CronJob automatically"]
+choices = ["Kubernetes starts taking database backups", "The API can store and validate backup objects, but no backup behavior is implemented", "The API rejects backup objects until a controller registers", "A built-in no-op controller sets each object's status"]
 answer = 1
 why = "A CRD registers an API type and its schema. A separate controller must watch instances and implement reconciliation. The name Backup is meaningful to humans but does not itself execute a backup."
 
@@ -27,19 +27,19 @@ why = "CRD names follow plural.group. The CRD object is cluster-scoped even when
 
 [[quiz]]
 q = "What is the relationship between served and storage in spec.versions?"
-choices = ["Every served version must be storage", "Exactly one version is the storage version; served controls which versions clients may use", "storage controls the namespace", "served selects the controller image"]
+choices = ["Every served version must be storage", "Exactly one version is the storage version; served controls which versions clients may use", "Several versions can be storage; served picks the default", "storage controls which version kubectl shows by default"]
 answer = 1
 why = "The API can serve multiple versions, but exactly one version is used for new persisted representations. Changing the storage version does not automatically rewrite every existing object, and conversion may require additional implementation."
 
 [[quiz]]
 q = "Which command discovers resource types in this lab's custom group?"
-choices = ["kubectl get pods --api-group=dojo.example.com", "kubectl api-resources --api-group=dojo.example.com", "kubectl create operator dojo.example.com", "kubectl logs crd"]
+choices = ["kubectl get pods --api-group=dojo.example.com", "kubectl api-resources --api-group=dojo.example.com", "kubectl explain --api-version=dojo.example.com/v1", "kubectl api-versions"]
 answer = 1
 why = "api-resources queries discovery and shows names, kinds, versions and whether resources are namespaced. get crd lists definitions, while get dojo-backups lists instances of the custom resource."
 
 [[quiz]]
 q = "Why do operators reconcile repeatedly instead of executing an instruction exactly once?"
-choices = ["The API cannot store status", "Desired state and real state can drift; repeated, idempotent reconciliation repairs that drift", "Controllers run only during installation", "Every API watch event is guaranteed to be unique"]
+choices = ["The API server retries failed writes for the operator", "Desired state and real state can drift; repeated, idempotent reconciliation repairs that drift", "Running once would exceed the API's rate limits", "Every API watch event is guaranteed to be unique"]
 answer = 1
 why = "Controllers can restart, receive duplicate observations or encounter transient failures. Reconciliation compares desired and observed state, performs safe incremental work, and records progress rather than treating each event as a once-only command."
 

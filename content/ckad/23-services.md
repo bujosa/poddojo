@@ -15,19 +15,19 @@ why = "Clients use the Service port. The named targetPort resolves independently
 
 [[quiz]]
 q = "A selector matches running Pods but EndpointSlices have no ready backend. What should you inspect next?"
-choices = ["The Docker image cache", "Pod readiness and named port resolution", "The Ingress TLS certificate", "The Service age only"]
+choices = ["The Service's sessionAffinity", "Pod readiness and named port resolution", "kube-proxy's iptables rules", "The Service type"]
 answer = 1
 why = "Running is a Pod phase, not proof of readiness. An unready Pod is normally excluded from usable Service backends; unresolved named ports can also prevent endpoints from being usable."
 
 [[quiz]]
 q = "What does a headless Service with a selector normally return through DNS?"
-choices = ["One stable virtual IP", "The node IP only", "Addresses of its eligible backend Pods", "A cloud load balancer hostname"]
+choices = ["One stable virtual IP", "The node IP only", "Addresses of its eligible backend Pods", "A CNAME to the Service's cluster IP"]
 answer = 2
 why = "clusterIP: None removes the virtual IP. DNS exposes backend addresses, so the client handles endpoint choice and connections."
 
 [[quiz]]
 q = "A LoadBalancer Service stays pending in this kind cluster. What does this mean?"
-choices = ["The selector is necessarily wrong", "No load-balancer implementation has assigned an external address", "The Service cannot have a ClusterIP", "DNS is disabled"]
+choices = ["The selector is necessarily wrong", "No load-balancer implementation has assigned an external address", "Its NodePorts were not allocated", "The selector matches no ready Pods yet"]
 answer = 1
 why = "A LoadBalancer Service needs an implementation to provision or advertise an external address. Pending is expected in this lab and does not by itself diagnose backend health."
 

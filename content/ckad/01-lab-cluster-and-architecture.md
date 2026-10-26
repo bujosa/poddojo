@@ -4,6 +4,7 @@ title = "The lab cluster and Kubernetes architecture"
 module = "foundations"
 minutes = 35
 needs = "cluster"
+requires = ["two-nodes"]
 objectives = [
   "Explain the control-plane and node components",
   "Trace desired state through a reconciliation loop",
@@ -20,10 +21,10 @@ why = "The scheduler records a node assignment after evaluating placement constr
 [[quiz]]
 q = "Why does deleting a Deployment-owned Pod usually cause another Pod to appear?"
 choices = [
-  "The terminal repeats the delete",
-  "etcd runs the image",
+  "The kubelet restarts the deleted Pod on the same node",
+  "The Pod's restartPolicy: Always recreates it",
   "The ReplicaSet reconciles the desired replica count",
-  "Every Pod is immortal",
+  "The scheduler reschedules the same Pod object",
 ]
 answer = 2
 why = "Deleting an instance does not remove the controller's desired state. A bare Pod has no such replacement controller."
@@ -34,7 +35,7 @@ choices = [
   "Your personal default cluster",
   "Any context chosen by the lesson",
   "Its own kubeconfig and kind-poddojo lab context",
-  "The Docker image registry",
+  "Whatever KUBECONFIG your shell exports",
 ]
 answer = 2
 why = "PodDojo supplies KUBECONFIG and guards the lab destination. Keep that environment rather than switching contexts or editing a personal configuration."

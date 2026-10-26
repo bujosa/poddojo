@@ -44,12 +44,18 @@ taken.
 the API server listens on the machine's address so this computer can reach it. NodePort 30080 and
 30443 are published on the machine.
 
+Lessons and exams may declare `requires`. Before setup, `lab::provide` checks `two-nodes` (a Ready
+worker besides the control plane) and installs `ingress-controller` on demand: the Traefik manifest
+in `crates/runner/assets/ingress-controller.yaml` (namespace `dojo-ingress`, HTTPS on NodePort 30443,
+and a `probe` curl Deployment for graders). It stays installed until the cluster is deleted.
+
 ## Grading
 
 A check is `run` (a read-only command) plus an expectation (`equals` / `contains` / `matches` /
 exit status). Lab steps pass when all their checks pass. Exams give partial credit per check, weight
 tasks, and roll scores up into the five CKAD domains. `dojo verify` proves content is gradeable:
-checks must fail before a step's solution runs and pass after it.
+checks must fail before a step's solution runs, reject every declared negative case (incomplete or
+wrong work), accept every alternative solution, and pass after the worked solution.
 
 ## Progress and resume
 

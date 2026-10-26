@@ -4,6 +4,7 @@ title = "Choose the right workload resource"
 module = "design-build"
 minutes = 55
 needs = "cluster"
+requires = ["two-nodes"]
 objectives = [
   "Choose controllers from application lifecycle requirements",
   "Compare Deployment replicas with StatefulSet identities",
@@ -14,7 +15,7 @@ domain = "design-build"
 
 [[quiz]]
 q = "Which workload suits interchangeable HTTP replicas and rolling updates?"
-choices = ["StatefulSet", "Deployment", "CronJob", "Bare Pod only"]
+choices = ["StatefulSet", "Deployment", "CronJob", "DaemonSet"]
 answer = 1
 why = "A Deployment manages ReplicaSets and template revisions. Stateless replicas normally do not need ordinal identities or per-replica claims."
 
@@ -22,7 +23,7 @@ why = "A Deployment manages ReplicaSets and template revisions. Stateless replic
 q = "What does a StatefulSet provide?"
 choices = [
   "Automatic database replication",
-  "A separate cluster per Pod",
+  "A stable virtual IP shared by its Pods",
   "Stable ordinal identity and association with persistent claims",
   "One Pod on each node",
 ]
@@ -34,8 +35,8 @@ q = "Why might a DaemonSet have only one Pod in a two-node cluster?"
 choices = [
   "DaemonSets have replicas=1 by default",
   "The other node may be ineligible because of taints or selectors",
-  "DaemonSets cannot use workers",
-  "A Service is mandatory",
+  "DaemonSets skip nodes already running a Pod with the same labels",
+  "The DaemonSet's updateStrategy is OnDelete",
 ]
 answer = 1
 why = "One per node means one per eligible node. Inspect constraints and tolerations before deciding coverage is wrong."
@@ -44,9 +45,9 @@ why = "One per node means one per eligible node. Inspect constraints and tolerat
 q = "What happens when a CronJob is suspended?"
 choices = [
   "Existing Jobs are killed",
-  "Its schedule is deleted",
+  "Every missed run starts when it is resumed",
   "New scheduled Jobs stop; existing Jobs continue",
-  "All owned Pods become Pending",
+  "Existing Jobs pause until it is resumed",
 ]
 answer = 2
 why = "Suspend controls future scheduling. Existing Job objects retain their own execution lifecycle."

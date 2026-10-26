@@ -14,7 +14,7 @@ domain = "design-build"
 
 [[quiz]]
 q = "Which event normally removes an emptyDir's contents?"
-choices = ["A single container restart", "Reading the directory", "Removal of its Pod from the node", "A ConfigMap update"]
+choices = ["A single container restart", "Scaling its Deployment from one replica to two", "Removal of its Pod from the node", "Restarting all its containers after a liveness failure"]
 answer = 2
 why = "emptyDir belongs to the Pod's lifetime on the node. It can survive container restarts but is not durable across Pod replacement."
 
@@ -23,8 +23,8 @@ q = "Why is a new standard-class PVC Pending before this lab creates a consumer?
 choices = [
   "The class is broken",
   "WaitForFirstConsumer delays provisioning and binding",
-  "All PVCs require a Secret",
-  "Its namespace must be default",
+  "It needs a matching PV created by hand first",
+  "The class uses volumeBindingMode: Immediate",
 ]
 answer = 1
 why = "Delayed binding lets the scheduler and provisioner coordinate topology. Create a consuming Pod before diagnosing this expected state as failure."
@@ -34,7 +34,7 @@ q = "What does ReadWriteOnce mean?"
 choices = [
   "Exactly one Pod",
   "Read-write mounting from one node, possibly by several Pods",
-  "A file can be written only once",
+  "Read-write mounting from many nodes at once",
   "Read-only mounting anywhere",
 ]
 answer = 1
@@ -42,16 +42,16 @@ why = "The scope is a node. ReadWriteOncePod is the distinct single-Pod mode and
 
 [[quiz]]
 q = "What does deleting a Pod that uses an independently created PVC normally do to that PVC?"
-choices = ["Always deletes it", "Turns it into a Secret", "Leaves it available for reuse", "Removes the StorageClass"]
+choices = ["Always deletes it", "Deletes it when the reclaimPolicy is Delete", "Leaves it available for reuse", "Releases its PV so another claim can bind it"]
 answer = 2
 why = "The claim has an independent lifecycle. Deleting the claim is a separate operation that can trigger the PV's reclaim policy."
 
 [[quiz]]
 q = "Why avoid hostPath for portable application persistence?"
 choices = [
-  "It is always read-only",
+  "It is wiped whenever the Pod restarts",
   "It couples data and security exposure to a node's filesystem",
-  "It cannot store text",
+  "It counts against the Pod's memory limit",
   "It automatically uses network storage",
 ]
 answer = 1

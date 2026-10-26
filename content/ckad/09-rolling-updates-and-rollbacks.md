@@ -15,25 +15,25 @@ why = "Surge percentages round up and unavailable percentages round down. Each i
 
 [[quiz]]
 q = "Which change creates a new Deployment revision?"
-choices = ["Changing spec.replicas", "Adding an annotation only to the Deployment metadata", "Changing a container image in spec.template", "Changing a Service selector"]
+choices = ["Changing spec.replicas", "Adding an annotation only to the Deployment metadata", "Changing a container image in spec.template", "Changing spec.strategy.rollingUpdate.maxSurge"]
 answer = 2
 why = "Deployment history records Pod template changes. Scaling changes desired counts without changing the template; an annotation outside the template does not itself start a rollout."
 
 [[quiz]]
 q = "What does ProgressDeadlineExceeded do automatically?"
-choices = ["Rolls back to the previous image", "Reports stalled progress without automatically rolling back", "Deletes the namespace", "Pauses the Deployment forever"]
+choices = ["Rolls back to the previous image", "Reports stalled progress without automatically rolling back", "Marks the rollout Failed and stops creating Pods", "Scales the new ReplicaSet back to zero"]
 answer = 1
 why = "The controller records a failed progress condition. You must diagnose the reason and change the template, fix the dependency, or explicitly undo the rollout."
 
 [[quiz]]
 q = "What must happen before rolling back a paused Deployment?"
-choices = ["Delete every ReplicaSet", "Scale to zero", "Resume the Deployment", "Remove all annotations"]
+choices = ["Scale the new ReplicaSet to zero", "Scale to zero", "Resume the Deployment", "Run kubectl rollout restart"]
 answer = 2
 why = "A paused Deployment does not process a rollback. Resume it, then use rollout undo and verify convergence. Pausing batches template edits; it is not a rollback mechanism."
 
 [[quiz]]
 q = "How does minReadySeconds differ from readiness?"
-choices = ["It delays container startup", "It requires continuous readiness before a Pod counts as available", "It changes the Service port", "It replaces progressDeadlineSeconds"]
+choices = ["It delays container startup", "It requires continuous readiness before a Pod counts as available", "It is the delay before the first readiness probe", "It replaces progressDeadlineSeconds"]
 answer = 1
 why = "A Ready Pod can already receive Service traffic, while the Deployment waits for the continuous readiness interval before counting it as available for rollout decisions."
 

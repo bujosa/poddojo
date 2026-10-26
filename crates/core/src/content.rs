@@ -59,6 +59,33 @@ pub enum Needs {
     Cluster,
 }
 
+/// Something a lab or exam needs from the lab cluster beyond `needs = "cluster"`. Checked (or
+/// installed) before setup, so the learner gets a clear message instead of a confusing failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Requirement {
+    /// A worker node besides the control plane (scheduling, spreading, node failure drills).
+    TwoNodes,
+    /// PodDojo's Traefik Ingress controller in namespace `dojo-ingress`, installed on demand.
+    IngressController,
+}
+
+/// An extra run of a step's (or task's) checks that `dojo verify` performs from the state the step
+/// starts in, before the worked solution: a negative case (incomplete or wrong work the checks must
+/// reject) or an alternative (different, equally correct work the checks must accept).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Case {
+    /// What this work does, in plain words ("uninstalls but keeps the release history").
+    pub name: String,
+    /// Shell commands (`set -e`) that produce the case's state.
+    pub run: String,
+    /// Shell commands that bring back the state the step starts in, so the next case and the worked
+    /// solution start clean. Empty when the solution overwrites the case's state anyway.
+    #[serde(default)]
+    pub undo: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QuizQuestion {
@@ -102,6 +129,12 @@ pub struct LabStep {
     pub solution: String,
     #[serde(default)]
     pub checks: Vec<Check>,
+    /// Incomplete or wrong work the checks must reject (run by `dojo verify`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub negatives: Vec<Case>,
+    /// Different correct work the checks must accept (run by `dojo verify`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub alternatives: Vec<Case>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -135,6 +168,8 @@ struct FrontMatter {
     #[serde(default)]
     needs: Needs,
     #[serde(default)]
+    requires: Vec<Requirement>,
+    #[serde(default)]
     objectives: Vec<String>,
     #[serde(default)]
     quiz: Vec<QuizQuestion>,
@@ -156,6 +191,8 @@ pub struct Lesson {
     /// CKAD domain id (`domains::DOMAINS`), when the lesson maps to one.
     pub domain: Option<String>,
     pub needs: Needs,
+    /// Extra lab cluster requirements (a worker node, the Ingress controller).
+    pub requires: Vec<Requirement>,
     pub objectives: Vec<String>,
     /// The concepts, in Markdown.
     pub body: String,
@@ -189,6 +226,12 @@ pub struct ExamTask {
     #[serde(default)]
     pub solution: String,
     pub checks: Vec<Check>,
+    /// Incomplete or wrong work the checks must reject (run by `dojo verify`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub negatives: Vec<Case>,
+    /// Different correct work the checks must accept (run by `dojo verify`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub alternatives: Vec<Case>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -200,6 +243,9 @@ pub struct Exam {
     pub summary: String,
     pub minutes: u32,
     pub pass_percent: u32,
+    /// Extra lab cluster requirements, checked or installed before the exam setup.
+    #[serde(default)]
+    pub requires: Vec<Requirement>,
     #[serde(default)]
     pub setup: Vec<String>,
     #[serde(default)]
@@ -306,6 +352,7 @@ impl Catalog {
                             minutes: f.minutes,
                             domain: f.domain,
                             needs: f.needs,
+                            requires: f.requires,
                             objectives: f.objectives,
                             body: body.trim().to_string(),
                             quiz: f.quiz,
@@ -469,6 +516,25 @@ fn domain_problem(domain: &str) -> Option<String> {
     Some(format!("unknown domain `{domain}` (one of: {})", known.join(", ")))
 }
 
+/// Problems with a step's or task's verification cases (`where_` says which step or task).
+fn case_problems(where_: &str, negatives: &[Case], alternatives: &[Case]) -> Vec<String> {
+    let mut out = Vec::new();
+    for (kind, c) in negatives.iter().map(|c| ("negative", c)).chain(alternatives.iter().map(|c| ("alternative", c))) {
+        if c.name.trim().is_empty() {
+            out.push(format!("{where_}: a {kind} case has no name"));
+        }
+        if c.run.trim().is_empty() {
+            out.push(format!("{where_}: {kind} case `{}` has nothing to run", c.name));
+        }
+        for cmd in [&c.run, &c.undo] {
+            if let Some(why) = crate::check::unsafe_command(cmd) {
+                out.push(format!("{where_}: {kind} case `{}` command {why}", c.name));
+            }
+        }
+    }
+    out
+}
+
 fn lesson_problems(l: &Lesson) -> Vec<String> {
     let mut out = Vec::new();
     if !valid_id(&l.id) {
@@ -502,6 +568,9 @@ fn lesson_problems(l: &Lesson) -> Vec<String> {
                 out.push(format!("lab command `{cmd}` {why}"));
             }
         }
+        if !l.requires.is_empty() && l.needs != Needs::Cluster {
+            out.push("`requires` only applies to lessons with `needs = \"cluster\"`".into());
+        }
         if l.needs == Needs::None && !lab.steps.is_empty() {
             out.push("a lesson with lab steps cannot have `needs = \"none\"`".into());
         }
@@ -517,6 +586,7 @@ fn lesson_problems(l: &Lesson) -> Vec<String> {
             for c in &s.checks {
                 out.extend(c.problems().into_iter().map(|p| format!("lab step {}: {p}", i + 1)));
             }
+            out.extend(case_problems(&format!("lab step {}", i + 1), &s.negatives, &s.alternatives));
         }
     }
     out
@@ -555,6 +625,7 @@ fn exam_problems(e: &Exam) -> Vec<String> {
         for c in &t.checks {
             out.extend(c.problems().into_iter().map(|p| format!("task {}: {p}", t.id)));
         }
+        out.extend(case_problems(&format!("task {}", t.id), &t.negatives, &t.alternatives));
     }
     out
 }
@@ -659,6 +730,38 @@ run = "true"
         }
         let total: usize = at.iter().sum();
         assert!(at.iter().all(|&n| n * 100 / total.max(1) < 40), "answers still bunched: {at:?}");
+    }
+
+    #[test]
+    fn parses_requirements_and_verification_cases() {
+        let text = lesson("a").replace("module = \"basics\"", "module = \"basics\"\nneeds = \"cluster\"\nrequires = [\"two-nodes\", \"ingress-controller\"]").replace(
+            "run = \"true\"\n",
+            "run = \"true\"\n[[lab.steps.negatives]]\nname = \"shortcut\"\nrun = \"echo half\"\n[[lab.steps.alternatives]]\nname = \"other way\"\nrun = \"echo other\"\nundo = \"echo back\"\n",
+        );
+        let files = vec![("docker/track.toml".to_string(), TRACK.to_string()), ("docker/01-a.md".to_string(), text)];
+        let c = Catalog::from_files(files).unwrap();
+        let l = c.lesson("a").unwrap();
+        assert_eq!(l.requires, vec![Requirement::TwoNodes, Requirement::IngressController]);
+        let step = &l.lab.as_ref().unwrap().steps[0];
+        assert_eq!(step.negatives[0].name, "shortcut");
+        assert_eq!(step.alternatives[0].undo, "echo back");
+    }
+
+    #[test]
+    fn rejects_bad_requirements_and_cases() {
+        let text =
+            lesson("a").replace("module = \"basics\"", "module = \"basics\"\nrequires = [\"two-nodes\"]").replace(
+                "run = \"true\"\n",
+                "run = \"true\"\n[[lab.steps.negatives]]\nname = \"\"\nrun = \"docker system prune -f\"\n",
+            );
+        let files = vec![("docker/track.toml".to_string(), TRACK.to_string()), ("docker/01-a.md".to_string(), text)];
+        let errors = Catalog::from_files(files).unwrap_err();
+        assert!(errors.iter().any(|e| e.message.contains("`requires` only applies")));
+        assert!(errors.iter().any(|e| e.message.contains("has no name")));
+        assert!(errors.iter().any(|e| e.message.contains("must not prune")));
+        let unknown = lesson("b").replace("module = \"basics\"", "module = \"basics\"\nrequires = [\"gpu\"]");
+        let files = vec![("docker/track.toml".to_string(), TRACK.to_string()), ("docker/01-b.md".to_string(), unknown)];
+        assert!(Catalog::from_files(files).is_err());
     }
 
     #[test]

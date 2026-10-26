@@ -21,25 +21,25 @@ why = "Base64 represents bytes as text and is trivially reversible. Confidential
 
 [[quiz]]
 q = "Which field accepts plain strings on write but is not returned as such on a Secret read?"
-choices = ["binaryData", "stringData", "plainText", "envFrom"]
+choices = ["binaryData", "stringData", "data", "metadata.annotations"]
 answer = 1
 why = "The API merges stringData into data, encoding the values for storage and output. If a key exists in both, stringData wins on that write. It is a convenience for input, not a separate storage mechanism."
 
 [[quiz]]
 q = "Which Secret type and key are used for modern registry credentials?"
-choices = ["Opaque with imagePassword", "kubernetes.io/tls with tls.key", "kubernetes.io/dockerconfigjson with .dockerconfigjson", "kubernetes.io/basic-auth with registry"]
+choices = ["kubernetes.io/dockercfg with .dockercfg", "kubernetes.io/tls with tls.key", "kubernetes.io/dockerconfigjson with .dockerconfigjson", "kubernetes.io/basic-auth with username and password"]
 answer = 2
 why = "The docker-registry generator produces kubernetes.io/dockerconfigjson with a .dockerconfigjson document. Reference it using imagePullSecrets in the same namespace as the Pod. It is used by the kubelet, not automatically injected into the application."
 
 [[quiz]]
 q = "What does YAML defaultMode: 0400 mean for a projected Secret file?"
-choices = ["Owner read permission only", "World-readable", "Owner write permission only", "Four hundred replicas"]
+choices = ["Owner read permission only", "World-readable", "Owner write permission only", "Owner read and write"]
 answer = 0
 why = "0400 is an octal permission mode. Its decimal equivalent is 256, which is what JSON and many API outputs show. File ownership and fsGroup can affect whether a non-root process can read the projection."
 
 [[quiz]]
 q = "Why can permission to create Pods expose Secrets even without direct get permission on Secrets?"
-choices = ["All Secrets are public", "A Pod creator can arrange for a workload to mount available namespace Secrets", "ServiceAccounts always have cluster-admin", "Base64 bypasses authentication"]
+choices = ["Creating Pods implicitly grants get on Secrets", "A Pod creator can arrange for a workload to mount available namespace Secrets", "The default ServiceAccount can read every Secret in its namespace", "kubectl describe pod prints the mounted Secret values"]
 answer = 1
 why = "A workload can consume a namespace Secret through the kubelet even if its ServiceAccount cannot directly read that Secret through the API. Control workload creation as well as direct Secret API access; RBAC on Secret reads alone is insufficient."
 

@@ -8,25 +8,25 @@ objectives = ["Use user-defined bridge DNS and network aliases", "Distinguish co
 
 [[quiz]]
 q = "What does a user-defined bridge add compared with the default bridge?"
-choices = ["A separate kernel", "Automatic DNS by container name and network alias", "A public IP for every container", "Automatic host-port publication"]
+choices = ["Encrypted traffic between its containers", "Automatic DNS by container name and network alias", "Direct access to the host's network stack", "Automatic host-port publication"]
 answer = 1
 why = "User-defined bridges provide scoped DNS. The default bridge does not provide the same automatic name lookup; publishing host ports is a separate decision."
 
 [[quiz]]
 q = "Two containers share a user-defined network. How should a client reach nginx listening on port 80?"
-choices = ["The daemon SSH port", "The published host port only", "The nginx container name or alias on port 80", "localhost:80 inside the client"]
+choices = ["The bridge gateway IP on port 80", "The published host port only", "The nginx container name or alias on port 80", "localhost:80 inside the client"]
 answer = 2
 why = "A shared network gives direct container-to-container reachability. localhost in the client means the client itself, not its peer."
 
 [[quiz]]
 q = "What does -p 18090:80 mean?"
-choices = ["Host 80 forwards to container 18090", "Container 80 becomes reachable through host 18090", "Both ports must be identical", "The application starts listening on 18090 inside"]
+choices = ["Host 80 forwards to container 18090", "Container 80 becomes reachable through host 18090", "Host 18090 forwards to container 80 on localhost only", "The application starts listening on 18090 inside"]
 answer = 1
 why = "Publication maps a host socket to an existing listener in the container network namespace. It does not reconfigure the application listener."
 
 [[quiz]]
 q = "A container connects to two bridge networks. What is the safest assumption?"
-choices = ["It automatically routes every packet between them", "It can communicate with peers on both attached networks", "Every other container joins both networks", "Its aliases become global DNS records"]
+choices = ["It automatically routes every packet between them", "It can communicate with peers on both attached networks", "It must pick one; the second attachment is ignored", "Its aliases become global DNS records"]
 answer = 1
 why = "Dual attachment gives that container access to both networks. It does not automatically turn the container into a router or make network-scoped aliases globally visible."
 

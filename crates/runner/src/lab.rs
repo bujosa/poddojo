@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use poddojo_core::{Check, CheckResult, CommandOutput, Lesson, Needs};
+use poddojo_core::{Check, CheckResult, CommandOutput, Lesson, Needs, Requirement};
 
 use crate::cluster;
 use crate::exec::{LabEnv, run};
@@ -43,16 +43,61 @@ pub fn preflight(needs: Needs, env: &LabEnv) -> Result<(), String> {
     Ok(())
 }
 
+/// The Ingress controller labs and exams can ask for (see the manifest's header).
+const INGRESS_CONTROLLER: &str = include_str!("../assets/ingress-controller.yaml");
+
+/// Make the lab cluster meet a lesson's or exam's `requires`: check for the worker node, install
+/// the Ingress controller (idempotent) and wait for it. Returns a transcript for the console.
+pub fn provide(requires: &[Requirement], env: &LabEnv) -> Result<String, String> {
+    let mut log = String::new();
+    for r in requires {
+        match r {
+            Requirement::TwoNodes => {
+                let nodes = match cluster::status(env) {
+                    cluster::Status::Running { nodes } => nodes,
+                    cluster::Status::Missing => return Err("no lab cluster yet: `dojo cluster up`".into()),
+                    cluster::Status::Unreachable(e) => return Err(e),
+                };
+                if nodes.iter().filter(|n| n.ready).count() < 2 {
+                    return Err("this lab needs the lab cluster's worker node, and the cluster has one node: \
+                                turn on \"Lab cluster with a worker node\" on the Setup page, then recreate the cluster (Cluster page, or \
+                                `dojo cluster down` and `dojo cluster up`)"
+                        .into());
+                }
+            }
+            Requirement::IngressController => {
+                cluster::guard(env)?;
+                let script = format!(
+                    "kubectl apply -f - <<'DOJO_EOF'\n{INGRESS_CONTROLLER}\nDOJO_EOF\n\
+                     kubectl -n dojo-ingress rollout status deployment/traefik --timeout=180s && \
+                     kubectl -n dojo-ingress rollout status deployment/probe --timeout=180s"
+                );
+                log.push_str("$ install the lab Ingress controller (Traefik in namespace dojo-ingress)\n");
+                let out = run(&script, env, Duration::from_secs(400));
+                log.push_str(&out.combined());
+                log.push('\n');
+                if !out.success() {
+                    return Err(format!("{log}{}", describe_failure(&out)));
+                }
+            }
+        }
+    }
+    Ok(log)
+}
+
 /// Write the lab's files and run its setup commands.
 pub fn prepare(lesson: &Lesson, env: &LabEnv) -> (bool, String) {
     if let Err(e) = preflight(lesson.needs, env) {
         return (false, format!("✗ {e}\n"));
     }
     let Some(lab) = &lesson.lab else { return (true, String::new()) };
+    let mut log = match provide(&lesson.requires, env) {
+        Ok(log) => log,
+        Err(e) => return (false, format!("✗ {e}\n")),
+    };
     if let Err(e) = write_files(&env.workdir, lab.files.iter()) {
         return (false, format!("✗ could not write lab files: {e}\n"));
     }
-    let mut log = String::new();
     if !lab.files.is_empty() {
         log.push_str(&format!("# wrote {} file(s) to {}\n", lab.files.len(), env.workdir.display()));
     }

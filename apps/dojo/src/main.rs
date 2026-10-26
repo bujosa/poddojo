@@ -7,7 +7,9 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use poddojo_core::{Catalog, CheckResult, Exam, Lesson, LessonStatus, Needs, Progress, QuizScore, exam, now};
+use poddojo_core::{
+    Case, Catalog, Check, CheckResult, Exam, Lesson, LessonStatus, Needs, Progress, QuizScore, exam, now,
+};
 use poddojo_runner::profiles::{self, Profile, Profiles};
 use poddojo_runner::{LabEnv, Paths, Settings, Target, cluster, doctor, lab, targets, terminal};
 
@@ -47,8 +49,9 @@ Environment
 
 Authoring
   validate [dir]           Validate content (default: ./content)
-  verify <lesson|all|exam:ID> [--keep]
-                           Prepare, apply the worked solutions, grade, then clean up
+  verify <lesson|all|exam:ID[/TASK]> [--keep]
+                           Prepare, try the negative and alternative cases, apply the
+                           worked solutions, grade, then clean up
 ";
 
 /// The profile the CLI acts as: `PODDOJO_PROFILE` (id or name), else the one used last in the app,
@@ -216,7 +219,7 @@ fn dispatch(args: &[&str]) -> Result<(), String> {
             let what: Vec<&str> = rest.iter().copied().filter(|a| *a != "--keep").collect();
             match what.as_slice() {
                 [w] => verify(&Ctx::load()?, w, keep),
-                _ => Err("usage: dojo verify <lesson|all|docker|ckad|exam:ID> [--keep]".into()),
+                _ => Err("usage: dojo verify <lesson|all|docker|ckad|exam:ID[/TASK]> [--keep]".into()),
             }
         }
         _ => Err(format!("unknown command `{}` (try `dojo help`)", args.join(" "))),
@@ -675,6 +678,7 @@ fn exam_start(c: &mut Ctx, id: &str) -> Result<(), String> {
     let env = exam_env(c, &e)?;
     cluster::guard(&env)?;
     println!("Preparing the exam environment…");
+    print!("{}", lab::provide(&e.requires, &env)?);
     // A retake starts clean: remove whatever the previous attempt left behind.
     let _ = lab::run_all(&e.cleanup, &env, Duration::from_secs(300));
     let setup: Vec<String> = e.setup.iter().chain(e.tasks.iter().flat_map(|t| &t.setup)).cloned().collect();
@@ -782,6 +786,68 @@ fn run_solution(markdown: &str, env: &LabEnv) -> Result<(), String> {
     Ok(())
 }
 
+/// Cleanup deletes namespaces with `--wait=false`; setup right after it would race the deletion
+/// ("being terminated"). Wait until no namespace the setup mentions is still terminating.
+fn wait_for_namespaces(setup: &[String], env: &LabEnv) {
+    let text = setup.join("\n");
+    for _ in 0..60 {
+        let out = poddojo_runner::run(
+            "kubectl get namespaces --field-selector status.phase=Terminating -o name",
+            env,
+            Duration::from_secs(15),
+        );
+        let busy = out
+            .stdout
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("namespace/"))
+            .any(|ns| text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-')).any(|word| word == ns));
+        if !out.success() || !busy {
+            return;
+        }
+        std::thread::sleep(Duration::from_secs(2));
+    }
+}
+
+/// Run a case's commands (or its undo) as one `set -e` script.
+fn run_case_script(script: &str, env: &LabEnv) -> Result<(), String> {
+    if script.trim().is_empty() {
+        return Ok(());
+    }
+    let out = poddojo_runner::run(&format!("set -e\n{script}"), env, Duration::from_secs(600));
+    if out.success() { Ok(()) } else { Err(out.combined()) }
+}
+
+/// Run every negative and alternative case of a step or task from the state it starts in:
+/// negatives must fail at least one check, alternatives must pass them all. Returns the problems.
+fn verify_cases(what: &str, checks: &[Check], negatives: &[Case], alternatives: &[Case], env: &LabEnv) -> Vec<String> {
+    let mut problems = Vec::new();
+    let cases = negatives.iter().map(|c| (true, c)).chain(alternatives.iter().map(|c| (false, c)));
+    for (negative, case) in cases {
+        let kind = if negative { "negative" } else { "alternative" };
+        if let Err(e) = run_case_script(&case.run, env) {
+            problems.push(format!("{what}: {kind} `{}` could not run:\n{e}", case.name));
+        } else {
+            let results = lab::run_checks(checks, env);
+            let failed: Vec<&CheckResult> = results.iter().filter(|r| !r.passed).collect();
+            let as_expected = failed.is_empty() != negative;
+            println!("    {} {kind}: {}", if as_expected { "✓" } else { "✗" }, case.name);
+            if negative && failed.is_empty() {
+                problems.push(format!("{what}: negative `{}` passes every check (the grader accepts it)", case.name));
+            }
+            if !negative {
+                for r in failed {
+                    problems
+                        .push(format!("{what}: alternative `{}` fails check `{}`: {}", case.name, r.name, r.detail));
+                }
+            }
+        }
+        if let Err(e) = run_case_script(&case.undo, env) {
+            problems.push(format!("{what}: undo of {kind} `{}` failed:\n{e}", case.name));
+        }
+    }
+    problems
+}
+
 fn verify_lesson(c: &Ctx, l: &Lesson, keep: bool) -> Result<(), String> {
     let Some(labdef) = &l.lab else {
         println!("· {} (no lab)", l.id);
@@ -789,16 +855,28 @@ fn verify_lesson(c: &Ctx, l: &Lesson, keep: bool) -> Result<(), String> {
     };
     let env = c.env_for(&l.id)?;
     let _ = lab::reset(l, &env);
+    if l.needs == Needs::Cluster {
+        wait_for_namespaces(&labdef.setup, &env);
+    }
     let (ok, log) = lab::prepare(l, &env);
     if !ok {
         return Err(format!("{}: setup failed\n{log}", l.id));
     }
     let mut problems = Vec::new();
+    let mut cases = 0;
     for (i, step) in labdef.steps.iter().enumerate() {
         let before = lab::run_checks(&step.checks, &env);
         if before.iter().all(|r| r.passed) && step.checks.iter().all(|c| c.exit.is_none()) {
             problems.push(format!("step {} passes before the solution runs (checks prove nothing)", i + 1));
         }
+        cases += step.negatives.len() + step.alternatives.len();
+        problems.extend(verify_cases(
+            &format!("step {}", i + 1),
+            &step.checks,
+            &step.negatives,
+            &step.alternatives,
+            &env,
+        ));
         if let Err(e) = run_solution(&step.solution, &env) {
             problems.push(format!("step {}: {e}", i + 1));
             break;
@@ -812,18 +890,24 @@ fn verify_lesson(c: &Ctx, l: &Lesson, keep: bool) -> Result<(), String> {
         let _ = lab::reset(l, &env);
     }
     if problems.is_empty() {
-        println!("✓ {} ({} steps)", l.id, labdef.steps.len());
+        println!("✓ {} ({} steps, {cases} extra case(s))", l.id, labdef.steps.len());
         Ok(())
     } else {
         Err(format!("{}:\n  {}", l.id, problems.join("\n  ")))
     }
 }
 
-fn verify_exam(c: &Ctx, e: &Exam, keep: bool) -> Result<(), String> {
-    let env = exam_env(c, e)?;
+fn verify_exam(c: &Ctx, full: &Exam, only: Option<&str>, keep: bool) -> Result<(), String> {
+    let env = exam_env(c, full)?;
+    // The whole exam is set up and cleaned up, but only the chosen task is cased and graded.
+    let mut picked_exam = full.clone();
+    picked_exam.tasks.retain(|t| only.is_none_or(|o| o == t.id));
+    let e = &picked_exam;
     cluster::guard(&env)?;
+    print!("{}", lab::provide(&e.requires, &env).map_err(|err| format!("exam {}: {err}", e.id))?);
     let _ = lab::run_all(&e.cleanup, &env, Duration::from_secs(300));
-    let setup: Vec<String> = e.setup.iter().chain(e.tasks.iter().flat_map(|t| &t.setup)).cloned().collect();
+    let setup: Vec<String> = e.setup.iter().chain(full.tasks.iter().flat_map(|t| &t.setup)).cloned().collect();
+    wait_for_namespaces(&setup, &env);
     let (ok, log) = lab::run_all(&setup, &env, Duration::from_secs(600));
     if !ok {
         return Err(format!("exam {}: setup failed\n{log}", e.id));
@@ -835,7 +919,10 @@ fn verify_exam(c: &Ctx, e: &Exam, keep: bool) -> Result<(), String> {
             problems.push(format!("task {} is already solved before the solution runs", t.id));
         }
     }
+    let mut cases = 0;
     for t in &e.tasks {
+        cases += t.negatives.len() + t.alternatives.len();
+        problems.extend(verify_cases(&format!("task {}", t.id), &t.checks, &t.negatives, &t.alternatives, &env));
         if let Err(err) = run_solution(&t.solution, &env) {
             problems.push(format!("task {}: {err}", t.id));
         }
@@ -850,7 +937,12 @@ fn verify_exam(c: &Ctx, e: &Exam, keep: bool) -> Result<(), String> {
         let _ = lab::run_all(&e.cleanup, &env, Duration::from_secs(300));
     }
     if problems.is_empty() {
-        println!("✓ exam {} ({} tasks, solutions score {:.0}%)", e.id, e.tasks.len(), after.percent);
+        println!(
+            "✓ exam {} ({} task(s), {cases} extra case(s), solutions score {:.0}%)",
+            e.id,
+            e.tasks.len(),
+            after.percent
+        );
         Ok(())
     } else {
         Err(format!("exam {}:\n  {}", e.id, problems.join("\n  ")))
@@ -859,8 +951,14 @@ fn verify_exam(c: &Ctx, e: &Exam, keep: bool) -> Result<(), String> {
 
 fn verify(c: &Ctx, what: &str, keep: bool) -> Result<(), String> {
     if let Some(id) = what.strip_prefix("exam:") {
+        let (id, only) = id.split_once('/').map_or((id, None), |(e, t)| (e, Some(t)));
         let e = c.catalog.exam(id).ok_or_else(|| format!("no exam `{id}`"))?;
-        return verify_exam(c, e, keep);
+        if let Some(t) = only
+            && !e.tasks.iter().any(|x| x.id == t)
+        {
+            return Err(format!("exam `{id}` has no task `{t}`"));
+        }
+        return verify_exam(c, e, only, keep);
     }
     let lessons: Vec<&Lesson> = match what {
         "all" => c.catalog.ordered_lessons().collect(),

@@ -8,31 +8,31 @@ objectives = ["Explain shared image layers and per-container copy-on-write stora
 
 [[quiz]]
 q = "Two containers start from the same local image. What do they share?"
-choices = ["Read-only image layers, with a separate writable layer per container", "One writable root filesystem", "A PID namespace by default", "Every environment-variable override"]
+choices = ["Read-only image layers, with a separate writable layer per container", "One writable root filesystem", "A PID namespace by default", "One writable layer, until one of them writes a file"]
 answer = 0
 why = "Image layers are reused. A write in one container changes its own upper layer and does not rewrite the image or the other container filesystem."
 
 [[quiz]]
 q = "What happens when a registry owner moves a tag?"
-choices = ["Already running containers change their root filesystem", "Every local image is immediately deleted", "The digest changes but still identifies the old bytes", "Future pulls can resolve the tag to different content"]
+choices = ["Already running containers change their root filesystem", "Your local copy updates on its next `docker run`", "The digest changes but still identifies the old bytes", "Future pulls can resolve the tag to different content"]
 answer = 3
 why = "A tag is a mutable reference. Existing containers retain their selected image content, while a later pull may retrieve a different image for the same tag."
 
 [[quiz]]
 q = "Why does deleting a large file in a later Dockerfile RUN not remove its bytes from earlier layers?"
-choices = ["Docker ignores file deletion", "The later layer masks the file but does not rewrite the immutable earlier layer", "Only root can delete files", "Tags keep files open"]
+choices = ["Docker ignores file deletion", "The later layer masks the file but does not rewrite the immutable earlier layer", "Deletion takes effect only after `docker image prune`", "The build cache keeps a copy that is still counted in the image"]
 answer = 1
 why = "Deletion is represented in a later filesystem changeset. The original blob still contains the file, so avoid copying secrets or temporary payloads into earlier image layers."
 
 [[quiz]]
 q = "Which command preserves image layers and image configuration for later restoration?"
-choices = ["docker export", "docker diff", "docker image save", "docker cp"]
+choices = ["docker export", "docker image history", "docker image save", "docker cp"]
 answer = 2
 why = "save creates an image archive that load can restore. Container export produces a filesystem archive and does not preserve the original image history and configuration in the same way."
 
 [[quiz]]
 q = "Why can one tag run on both an ARM laptop and an x86 server?"
-choices = ["An image index can reference separate platform-specific manifests", "The executable changes CPU instructions at runtime", "All Alpine images are CPU-independent", "Docker ignores the machine architecture"]
+choices = ["An image index can reference separate platform-specific manifests", "One manifest holds both architectures' binaries in one layer", "The registry rebuilds the image for the requesting CPU on pull", "The layers contain portable bytecode any CPU can execute"]
 answer = 0
 why = "A multi-platform index points to images for different OS/architecture combinations. Docker selects a matching platform; the individual binaries still target a particular architecture."
 

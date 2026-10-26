@@ -8,19 +8,19 @@ objectives = ["Choose named volumes, bind mounts or tmpfs for a data lifecycle",
 
 [[quiz]]
 q = "Where is the source of a bind mount resolved for a remote Docker engine?"
-choices = ["Inside the image", "On the computer running the CLI", "On the selected daemon host", "Inside the SSH connection cache"]
+choices = ["Inside the image", "On the computer running the CLI", "On the selected daemon host", "On the CLI computer, then copied to the daemon over SSH"]
 answer = 2
 why = "The daemon creates the mount. A local laptop directory is not automatically uploaded to the server; a named volume avoids this host-path dependency."
 
 [[quiz]]
 q = "What happens to a named volume when its container is removed?"
-choices = ["It is always deleted", "It remains until explicitly removed when no longer in use", "It becomes part of the image", "It is copied into the next image pull"]
+choices = ["It is always deleted", "It remains until explicitly removed when no longer in use", "It is detached and becomes an anonymous volume", "It is removed with the container by `docker rm -v`"]
 answer = 1
 why = "Named volumes have their own lifecycle. Removing a container removes its writable layer, while the named volume remains available for a replacement container."
 
 [[quiz]]
 q = "Two containers mount one volume, and the second uses readonly. What is protected?"
-choices = ["The entire volume from every writer", "Only reads by the first container", "Writes through the second container mount", "All files on the host"]
+choices = ["The entire volume from every writer", "Only reads by the first container", "Writes through the second container mount", "Only the files the second container created"]
 answer = 2
 why = "Read-only is a property of that mount. Another container with a writable mount can still change the shared data, and readers may see those changes."
 

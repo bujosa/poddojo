@@ -9,31 +9,31 @@ domain = "design-build"
 
 [[quiz]]
 q = "What does EXPOSE 8080 do?"
-choices = ["Publishes host port 8080", "Changes the application listening port", "Documents the intended container port without publishing it", "Creates a Kubernetes Service"]
+choices = ["Publishes host port 8080", "Changes the application listening port", "Documents the intended container port without publishing it", "Opens the port in the host firewall"]
 answer = 2
 why = "EXPOSE is metadata. The process must actually listen on that port, and Docker requires -p or another explicit publishing mechanism for host access."
 
 [[quiz]]
 q = "Which input is available during build without automatically becoming a runtime environment variable?"
-choices = ["ARG", "ENV", "USER", "EXPOSE"]
+choices = ["ARG", "ENV", "LABEL", "ARG followed by ENV NAME=$NAME"]
 answer = 0
 why = "ARG is scoped build-time input. ENV persists in image runtime configuration. Neither is a safe place for secrets; build metadata, history or resulting files can reveal inputs."
 
 [[quiz]]
 q = "With ENTRYPOINT [\"python\"] and CMD [\"app.py\"], what does docker run IMAGE other.py do?"
-choices = ["Starts a shell", "Runs app.py and then other.py", "Replaces the entrypoint with other.py", "Runs python other.py"]
+choices = ["Runs python app.py other.py", "Runs app.py and then other.py", "Replaces the entrypoint with other.py", "Runs python other.py"]
 answer = 3
 why = "Arguments after the image replace CMD and are appended to the exec-form ENTRYPOINT. --entrypoint is the separate flag for replacing the executable."
 
 [[quiz]]
 q = "Why prefer COPY over ADD for an ordinary source file?"
-choices = ["COPY automatically extracts every archive", "COPY expresses a straightforward local copy without ADD special behavior", "ADD cannot copy files", "COPY downloads a newer application version"]
+choices = ["COPY automatically extracts every archive", "COPY expresses a straightforward local copy without ADD special behavior", "ADD invalidates the build cache on every build", "COPY produces smaller layers than ADD for the same file"]
 answer = 1
 why = "ADD has additional behaviors such as local archive extraction and remote sources. Use COPY for normal context files so the Dockerfile communicates exactly what is intended."
 
 [[quiz]]
 q = "Why place frequently changing application files after stable dependency installation?"
-choices = ["Docker requires alphabetical instructions", "COPY does not affect the cache", "A source change then invalidates fewer expensive cache-dependent steps", "It guarantees no registry access"]
+choices = ["Later instructions then run in parallel with earlier ones", "COPY does not affect the cache", "A source change then invalidates fewer expensive cache-dependent steps", "It makes the final image smaller"]
 answer = 2
 why = "Cache reuse depends on inputs and previous steps. Keeping stable dependency inputs earlier avoids repeating expensive work for every source edit, while changes to those inputs still invalidate the right work."
 

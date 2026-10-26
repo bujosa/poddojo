@@ -17,23 +17,23 @@ q = "What do containers in one ordinary Pod share?"
 choices = [
   "Their entire root filesystem",
   "A network namespace and any explicitly shared volumes",
-  "Independent Pod IPs",
-  "Separate node assignments",
+  "A PID namespace and root filesystem, but separate IPs",
+  "Only explicitly shared volumes; each has its own IP",
 ]
 answer = 1
 why = "Containers share localhost and one Pod IP. Files are shared only through mounted volumes; each container image supplies its own root filesystem."
 
 [[quiz]]
 q = "Which field overrides an image ENTRYPOINT?"
-choices = ["args", "ports", "command", "metadata.name"]
+choices = ["args", "workingDir", "command", "lifecycle.postStart"]
 answer = 2
 why = "command replaces the image entrypoint. args supplies arguments. Shell syntax works only when a shell is explicitly invoked."
 
 [[quiz]]
 q = "A one-off Pod must never be restarted by the kubelet, whether it succeeds or fails. Which restartPolicy?"
-choices = ["Always", "Never", "OnFailure", "IfNotPresent"]
+choices = ["Always", "Never", "OnFailure", "OnFailure with backoffLimit: 0"]
 answer = 1
-why = "Never leaves the container terminated after any exit, keeping the result for inspection. OnFailure would restart it after a non-zero exit, Always after any exit; IfNotPresent is an imagePullPolicy value, not a restartPolicy."
+why = "Never leaves the container terminated after any exit, keeping the result for inspection. OnFailure would restart it after a non-zero exit, Always after any exit; backoffLimit is a Job field, not a Pod field, so it cannot stop the kubelet restarting an OnFailure container."
 
 [[quiz]]
 q = "Is CrashLoopBackOff a Pod phase?"
@@ -41,7 +41,7 @@ choices = [
   "Yes, equivalent to Failed",
   "Yes, equivalent to Pending",
   "No; it describes a container restart backoff",
-  "No; it is a Service type",
+  "No; it is a Pod condition type",
 ]
 answer = 2
 why = "The phase can still be Running while a container repeatedly fails. Inspect container states, exit codes and logs rather than relying on the display column."

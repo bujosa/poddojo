@@ -9,25 +9,25 @@ objectives = ["Design non-overlapping Deployment selectors and shared Service la
 
 [[quiz]]
 q = "Which object normally changes at a basic blue/green cutover?"
-choices = ["The Service selector", "Every Pod IP manually", "The cluster DNS suffix", "The blue Deployment selector"]
+choices = ["The Service selector", "The IngressClass", "The green Deployment's replica count only", "The blue Deployment selector"]
 answer = 0
 why = "The Service keeps its address while its selector changes the eligible backend set. Deployment selectors should remain stable and disjoint."
 
 [[quiz]]
 q = "Four ready stable Pods and one ready canary Pod share a Service. What is guaranteed?"
-choices = ["Exactly every fifth HTTP request reaches canary", "Canary gets all new TCP connections", "The eligible endpoint count is 4:1, not an exact request percentage", "The canary Pod uses one fifth of the CPU"]
+choices = ["Exactly every fifth HTTP request reaches canary", "Canary gets all new TCP connections", "The eligible endpoint count is 4:1, not an exact request percentage", "Canary gets 20% of requests once sessionAffinity is set"]
 answer = 2
 why = "A plain Service balances connections, subject to implementation and traffic policy. Connection reuse, session affinity, locality, and readiness can skew observed requests."
 
 [[quiz]]
 q = "Why should two Deployments not both select only app=dojo-web?"
-choices = ["Services cannot select that label", "The controllers could have overlapping ownership intentions", "Labels must be globally unique", "A version label cannot be added"]
+choices = ["Services cannot select that label", "The controllers could have overlapping ownership intentions", "The Service would route only to the newer Deployment", "The API rejects the second Deployment's duplicate selector"]
 answer = 1
 why = "Use an additional stable identity such as track to separate Deployment selectors. The Service may intentionally select the wider app label to include both groups."
 
 [[quiz]]
 q = "Where should you verify the current ready Service backends?"
-choices = ["Only helm history", "Only the image repository", "EndpointSlices selected by kubernetes.io/service-name", "The local hosts file"]
+choices = ["The Service's spec.clusterIP", "kubectl get pods -l app=dojo-web", "EndpointSlices selected by kubernetes.io/service-name", "The Deployment's status.availableReplicas"]
 answer = 2
 why = "EndpointSlices record endpoint addresses, target Pods, and readiness conditions. Compare these with Pod track/version labels; selector intent alone does not prove backends are ready."
 

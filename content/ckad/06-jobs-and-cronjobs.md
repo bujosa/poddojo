@@ -17,7 +17,7 @@ q = "What does completions=3, parallelism=2 request?"
 choices = [
   "Two successes using three containers each",
   "Three successful Pod completions with up to two active attempts",
-  "Three nodes",
+  "Three Pods started at once, with two allowed to fail",
   "Exactly two running Pods at all times",
 ]
 answer = 1
@@ -25,7 +25,7 @@ why = "Completions sets the success target; parallelism controls concurrent acti
 
 [[quiz]]
 q = "Which field stops a Job that runs too long?"
-choices = ["ttlSecondsAfterFinished", "successfulJobsHistoryLimit", "activeDeadlineSeconds", "schedule"]
+choices = ["ttlSecondsAfterFinished", "successfulJobsHistoryLimit", "activeDeadlineSeconds", "backoffLimit"]
 answer = 2
 why = "The active deadline limits execution duration. TTL begins after completion and controls removal rather than runtime."
 
@@ -35,7 +35,7 @@ choices = [
   "Yes, across the cluster",
   "Yes, across the namespace",
   "No; it governs scheduled Jobs from that CronJob",
-  "Only if the image is busybox",
+  "Only if the Job was created with --from=cronjob/NAME",
 ]
 answer = 2
 why = "The policy coordinates a CronJob's scheduled executions. Manual Jobs and other CronJobs are outside that coordination."
@@ -45,8 +45,8 @@ q = "What is true when restartPolicy is Never?"
 choices = [
   "No Job retries can happen",
   "A failed container stays stopped in its Pod; the Job may create another Pod",
-  "The Job can never complete",
-  "Every failure is ignored",
+  "The kubelet restarts the failed container in the same Pod",
+  "backoffLimit no longer applies",
 ]
 answer = 1
 why = "Never disables in-Pod container restarts, not the Job controller's replacement attempts. backoffLimit still controls the Job retry budget."

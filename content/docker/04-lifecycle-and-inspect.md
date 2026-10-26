@@ -8,31 +8,31 @@ objectives = ["Interpret container state, exit codes and OOM evidence", "Handle 
 
 [[quiz]]
 q = "A container exited with code 137. What can you conclude?"
-choices = ["It definitely ran out of memory", "It completed successfully", "Docker deleted the container", "It conventionally indicates SIGKILL; inspect OOMKilled and other evidence"]
+choices = ["It definitely ran out of memory", "Its executable could not be found", "It exited after a graceful SIGTERM", "It conventionally indicates SIGKILL; inspect OOMKilled and other evidence"]
 answer = 3
 why = "137 is conventionally 128 + SIGKILL (9). An OOM kill, docker kill, or a stop timeout can produce it; the number alone does not identify the cause, and a program can explicitly exit with that number."
 
 [[quiz]]
 q = "Why use exec form for an image entrypoint?"
-choices = ["It adds a shell automatically", "It lets the application receive signals directly as the main process", "It makes all processes run as root", "It disables exit codes"]
+choices = ["It adds a shell automatically", "It lets the application receive signals directly as the main process", "It expands variables such as $PORT in the arguments", "It keeps the container running after the application exits"]
 answer = 1
 why = "A shell wrapper can absorb or fail to forward signals. Exec form starts the application directly; a wrapper should finish with exec so the application replaces the shell."
 
 [[quiz]]
 q = "What distinguishes always from unless-stopped after an explicit manual stop?"
-choices = ["unless-stopped ignores manual stops immediately", "always restarts only on nonzero exits", "Only always can restart after the daemon restarts", "Both delete stopped containers"]
+choices = ["Neither restarts after a manual stop, even when the daemon restarts", "always restarts only on nonzero exits", "Only always can restart after the daemon restarts", "Only unless-stopped can restart after the daemon restarts"]
 answer = 2
 why = "A manual stop suppresses immediate automatic restart for both. always can start the container again when the daemon restarts; unless-stopped preserves the stopped intention."
 
 [[quiz]]
 q = "What does docker diff show?"
-choices = ["Added, changed and deleted paths in a container writable layer", "A comparison of two registry manifests", "Only environment-variable changes", "All files in every mounted volume"]
+choices = ["Added, changed and deleted paths in a container writable layer", "A comparison of two registry manifests", "Differences between the container config and its image config", "Changes in mounted volumes as well as in the writable layer"]
 answer = 0
 why = "diff reports filesystem changes relative to the image, with A, C and D markers. It is not a backup, a Dockerfile generator, or a report of changes inside independent volume storage."
 
 [[quiz]]
 q = "Which observation proves a process is healthy?"
-choices = ["The container state is running", "A nonzero host PID", "The image has an EXPOSE instruction", "A successful application-level request matching the expected behavior"]
+choices = ["The container state is running", "`docker ps` shows the port as published", "The restart count stays at zero", "A successful application-level request matching the expected behavior"]
 answer = 3
 why = "Running means the main process exists. It does not prove that a dependency works or the application can serve requests; verify application behavior separately."
 
