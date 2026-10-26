@@ -6,6 +6,7 @@ use poddojo_core::{Exam, ExamAttempt, exam, now};
 use poddojo_runner::{cluster, lab};
 
 use super::{accent_button, ago, domain_title, title};
+use crate::icons::{self, Icon};
 use crate::jobs::Done;
 use crate::markdown::{self, Action};
 use crate::theme::{self, Tokens};
@@ -42,44 +43,85 @@ impl App {
                 ui.add_space(8.0);
             }
             for e in self.catalog.exams.clone() {
-                theme::card(&t).show(ui, |ui| {
+                theme::card(&t).inner_margin(egui::Margin::same(20)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(&e.title).size(18.0).strong());
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let busy = self.jobs.busy("exam");
-                            if ui.add_enabled(self.cluster_running() && !busy, egui::Button::new(RichText::new("▶ Start").strong())).clicked() {
-                                self.start_exam(&ctx, &e);
+                    let best = self.progress.best_attempt(&e.id).cloned();
+                    ui.horizontal_top(|ui| {
+                        ui.allocate_ui_with_layout(
+                            egui::vec2((ui.available_width() - 150.0).max(240.0), 0.0),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                ui.set_min_width(ui.available_width());
+                                ui.label(RichText::new(&e.title).size(19.0).strong().color(strong(&t)));
+                                ui.label(
+                                    RichText::new(format!("{} tasks · {} minutes · {}% to pass", e.tasks.len(), e.minutes, e.pass_percent))
+                                        .color(t.muted),
+                                );
+                                ui.add_space(6.0);
+                                if !e.summary.is_empty() {
+                                    ui.label(&e.summary);
+                                }
+                                ui.add_space(8.0);
+                                let mut weights: BTreeMap<&str, u32> = BTreeMap::new();
+                                for task in &e.tasks {
+                                    *weights.entry(task.domain.as_str()).or_default() += task.weight;
+                                }
+                                ui.horizontal_wrapped(|ui| {
+                                    for d in poddojo_core::DOMAINS {
+                                        if let Some(w) = weights.get(d.id) {
+                                            theme::chip(ui, &format!("{} · {w}%", short_domain(d.id)), t.muted, t.card_hover);
+                                        }
+                                    }
+                                });
+                                let attempts: Vec<&ExamAttempt> = self.progress.exams.iter().filter(|a| a.exam_id == e.id).collect();
+                                if !attempts.is_empty() {
+                                    ui.add_space(4.0);
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.label(RichText::new("Attempts").size(12.5).color(t.muted));
+                                        for a in attempts.iter().rev().take(6) {
+                                            let resp = ui.add(
+                                                egui::Label::new(
+                                                    RichText::new(format!("{:.0}% · {}", a.percent, ago(a.finished_at)))
+                                                        .size(12.5)
+                                                        .color(if a.passed { t.good } else { t.amber }),
+                                                )
+                                                .sense(egui::Sense::click()),
+                                            );
+                                            if resp.on_hover_text("Review this attempt").clicked() {
+                                                self.exam.result = Some((*a).clone());
+                                            }
+                                        }
+                                    });
+                                }
+                            },
+                        );
+                        ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                            match &best {
+                                Some(a) => theme::ring(
+                                    ui,
+                                    &t,
+                                    a.percent / 100.0,
+                                    104.0,
+                                    &format!("{:.0}%", a.percent),
+                                    "best",
+                                    if a.passed { t.good } else { t.amber },
+                                ),
+                                None => theme::ring(ui, &t, 0.0, 104.0, "–", "not taken", t.muted),
                             }
+                            ui.add_space(6.0);
+                            let busy = self.jobs.busy("exam");
+                            ui.add_enabled_ui(self.cluster_running() && !busy, |ui| {
+                                if accent_button(ui, &t, if best.is_some() { "Retake" } else { "Start exam" }).clicked() {
+                                    self.start_exam(&ctx, &e);
+                                }
+                            });
                             if busy {
                                 ui.spinner();
                             }
                         });
                     });
-                    ui.label(RichText::new(format!("{} tasks · {} minutes · pass {}%", e.tasks.len(), e.minutes, e.pass_percent)).color(t.muted));
-                    if !e.summary.is_empty() {
-                        ui.label(&e.summary);
-                    }
-                    let mut weights: BTreeMap<&str, u32> = BTreeMap::new();
-                    for task in &e.tasks {
-                        *weights.entry(task.domain.as_str()).or_default() += task.weight;
-                    }
-                    ui.horizontal_wrapped(|ui| {
-                        for (d, w) in weights {
-                            theme::chip(ui, &format!("{} {w}%", domain_title(d)), t.muted, t.card_hover);
-                        }
-                    });
-                    let attempts: Vec<&ExamAttempt> = self.progress.exams.iter().filter(|a| a.exam_id == e.id).collect();
-                    if !attempts.is_empty() {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label(RichText::new("Attempts:").small().color(t.muted));
-                            for a in attempts.iter().rev().take(6) {
-                                ui.label(RichText::new(format!("{:.0}% ({})", a.percent, ago(a.finished_at))).small().color(if a.passed { t.good } else { t.amber }));
-                            }
-                        });
-                    }
                 });
-                ui.add_space(8.0);
+                ui.add_space(10.0);
             }
             if !self.exam.log.is_empty() {
                 egui::CollapsingHeader::new("Last exam log").show(ui, |ui| {
@@ -217,100 +259,146 @@ impl App {
     }
 
     fn exam_workspace(&mut self, ui: &mut egui::Ui, t: &Tokens, ctx: &egui::Context, e: &Exam, started_at: i64) {
-        let left = e.minutes as i64 * 60 - (now() - started_at);
+        let total_secs = e.minutes as i64 * 60;
+        let left = total_secs - (now() - started_at);
         ctx.request_repaint_after(Duration::from_secs(1));
         let flagged = self.progress.active_exam.as_ref().map(|a| a.flagged.clone()).unwrap_or_default();
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(&e.title).size(22.0).strong());
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let grading = self.jobs.busy("exam grade");
-                if ui.add_enabled(!grading, egui::Button::new(RichText::new("Finish & grade").strong())).clicked() {
-                    self.exam.confirm_finish = true;
-                }
-                if grading {
-                    ui.spinner();
-                    ui.label("grading…");
-                }
-                ui.add_space(10.0);
+        // Timer bar.
+        theme::card(t).inner_margin(egui::Margin::symmetric(18, 12)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                icons::show(ui, Icon::Stopwatch, 26.0, if left < 15 * 60 { t.amber } else { t.accent });
                 let (mm, ss) = (left.abs() / 60, left.abs() % 60);
-                let text =
-                    if left >= 0 { format!("⏱ {mm}:{ss:02}") } else { format!("⏱ -{mm}:{ss:02} (time is up)") };
+                let text = if left >= 0 { format!("{mm}:{ss:02}") } else { format!("-{mm}:{ss:02}") };
                 let color = if left < 0 {
                     t.bad
                 } else if left < 15 * 60 {
                     t.amber
                 } else {
-                    t.text
+                    strong(t)
                 };
-                ui.label(RichText::new(text).size(22.0).strong().monospace().color(color));
-            });
-        });
-        ui.label(RichText::new("Work in the console or Open terminal (each task names its namespace). No hints and no grading until you finish, like the real exam.").small().color(t.muted));
-        ui.separator();
-        super::split_left(ui, 250.0, |ui, left| {
-            if left {
-                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-                egui::ScrollArea::vertical().id_salt("exam-tasks").show(ui, |ui| {
-                    for (i, task) in e.tasks.iter().enumerate() {
-                        let flag = if flagged.contains(&task.id) { "⚑ " } else { "" };
-                        let text = RichText::new(format!("{flag}{}. {} · {}%", i + 1, task.title, task.weight))
-                            .color(if flagged.contains(&task.id) { t.amber } else { t.text });
-                        if ui.selectable_label(self.exam.task == i, text).clicked() {
-                            self.exam.task = i;
-                            if let Some(a) = &mut self.progress.active_exam {
-                                a.current_task = i;
-                            }
-                        }
+                ui.label(RichText::new(text).size(28.0).strong().monospace().color(color));
+                ui.add_space(10.0);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(&e.title).size(16.0).strong());
+                    ui.label(
+                        RichText::new(format!(
+                            "Task {} of {} · {} flagged · pass {}%",
+                            self.exam.task + 1,
+                            e.tasks.len(),
+                            flagged.len(),
+                            e.pass_percent
+                        ))
+                        .size(12.5)
+                        .color(t.muted),
+                    );
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let grading = self.jobs.busy("exam grade");
+                    if ui.add_enabled(!grading, egui::Button::new(RichText::new("Finish and grade").strong())).clicked()
+                    {
+                        self.exam.confirm_finish = true;
+                    }
+                    if grading {
+                        ui.spinner();
+                        ui.label("grading…");
                     }
                 });
-                return;
-            }
-            let Some(task) = e.tasks.get(self.exam.task).cloned() else { return };
-            egui::ScrollArea::vertical().id_salt(format!("exam-task-{}", task.id)).auto_shrink([false, false]).show(
-                ui,
-                |ui| {
-                    ui.set_max_width(ui.available_width().min(860.0));
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(
-                            RichText::new(format!("Task {} of {}", self.exam.task + 1, e.tasks.len())).color(t.muted),
-                        );
-                        theme::chip(ui, &format!("{}%", task.weight), t.accent, t.accent_soft);
-                        theme::chip(ui, domain_title(&task.domain), t.muted, t.card_hover);
-                        if let Some(ns) = &task.namespace {
-                            theme::chip(ui, &format!("namespace {ns}"), t.amber, t.card_hover);
+            });
+            let used = (1.0 - left as f32 / total_secs.max(1) as f32).clamp(0.0, 1.0);
+            let w = ui.available_width();
+            theme::bar(ui, t, used, w, if left < 15 * 60 { t.amber } else { t.accent });
+        });
+        ui.add_space(10.0);
+        let total = ui.available_rect_before_wrap();
+        let list_w = 230.0;
+        let term_w = (total.width() * 0.42).clamp(380.0, 640.0);
+        let list = egui::Rect::from_min_size(total.min, egui::vec2(list_w, total.height()));
+        let task_rect = egui::Rect::from_min_max(
+            egui::pos2(total.min.x + list_w + 14.0, total.min.y),
+            egui::pos2(total.max.x - term_w - 14.0, total.max.y),
+        );
+        let term = egui::Rect::from_min_max(egui::pos2(total.max.x - term_w, total.min.y), total.max);
+        // Task list.
+        ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
+            ui.set_clip_rect(list.intersect(ui.clip_rect()));
+            egui::ScrollArea::vertical().id_salt("exam-tasks").auto_shrink([false, false]).show(ui, |ui| {
+                for (i, task) in e.tasks.iter().enumerate() {
+                    if task_row(ui, t, i + 1, &task.title, task.weight, self.exam.task == i, flagged.contains(&task.id))
+                        .clicked()
+                    {
+                        self.exam.task = i;
+                        if let Some(a) = &mut self.progress.active_exam {
+                            a.current_task = i;
                         }
+                    }
+                }
+            });
+        });
+        // Task.
+        ui.scope_builder(egui::UiBuilder::new().max_rect(task_rect), |ui| {
+            ui.set_clip_rect(task_rect.intersect(ui.clip_rect()));
+            let Some(task) = e.tasks.get(self.exam.task).cloned() else { return };
+            egui::ScrollArea::vertical().id_salt(format!("exam-task-{}", task.id)).auto_shrink([false, false]).show(ui, |ui| {
+                ui.set_width(task_rect.width() - 12.0);
+                theme::card(t).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal_wrapped(|ui| {
+                        theme::chip(ui, &format!("{} points", task.weight), t.accent, t.accent_soft);
+                        theme::chip(ui, domain_title(&task.domain), t.muted, t.card_hover);
                     });
-                    ui.label(RichText::new(&task.title).size(20.0).strong().color(if t.dark {
-                        Color32::WHITE
-                    } else {
-                        Color32::BLACK
-                    }));
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(&task.title).size(20.0).strong().color(strong(t)));
+                    if let Some(ns) = &task.namespace {
+                        egui::Frame::new()
+                            .fill(t.amber.gamma_multiply(0.12))
+                            .corner_radius(8)
+                            .inner_margin(egui::Margin::symmetric(10, 6))
+                            .show(ui, |ui| {
+                                ui.label(RichText::new(format!("Namespace: {ns}")).monospace().color(t.amber));
+                            });
+                    }
+                    ui.add_space(4.0);
                     if let Some(Action::Run(cmd)) = markdown::show(ui, t, &task.task, &format!("exam-{}", task.id)) {
                         self.run_in_console(ctx, &cmd);
                     }
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        let is_flagged = flagged.contains(&task.id);
-                        if ui.button(if is_flagged { "Unflag" } else { "⚑ Flag for review" }).clicked()
-                            && let Some(a) = &mut self.progress.active_exam
-                        {
-                            if is_flagged {
-                                a.flagged.remove(&task.id);
-                            } else {
-                                a.flagged.insert(task.id.clone());
-                            }
-                            self.save_progress();
+                });
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    let is_flagged = flagged.contains(&task.id);
+                    if icons::button(ui, Icon::Flag, if is_flagged { "Unflag" } else { "Flag for review" }).clicked()
+                        && let Some(a) = &mut self.progress.active_exam
+                    {
+                        if is_flagged {
+                            a.flagged.remove(&task.id);
+                        } else {
+                            a.flagged.insert(task.id.clone());
                         }
-                        if self.exam.task > 0 && ui.button("← Previous").clicked() {
-                            self.exam.task -= 1;
-                        }
-                        if self.exam.task + 1 < e.tasks.len() && accent_button(ui, t, "Next →").clicked() {
+                        self.save_progress();
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if self.exam.task + 1 < e.tasks.len() && accent_button(ui, t, "Next task").clicked() {
                             self.exam.task += 1;
                         }
+                        if self.exam.task > 0 && ui.button("Previous").clicked() {
+                            self.exam.task -= 1;
+                        }
                     });
-                },
-            );
+                });
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new("Like the real exam: no hints and no grading until you finish. kubernetes.io/docs is allowed.")
+                        .size(12.0)
+                        .color(t.muted),
+                );
+            });
         });
+        // Terminal.
+        ui.scope_builder(egui::UiBuilder::new().max_rect(term), |ui| {
+            let chips = self.terminal_chips();
+            self.terminal(ui, &chips);
+        });
+        ui.allocate_rect(total, egui::Sense::hover());
         if self.exam.confirm_finish {
             let mut open = true;
             egui::Window::new("Finish the exam?")
@@ -382,7 +470,7 @@ impl App {
                         RichText::new(if full {
                             "✔"
                         } else if r.earned > 0.0 {
-                            "½"
+                            "~"
                         } else {
                             "✖"
                         })
@@ -420,5 +508,82 @@ impl App {
                 }
             }
         });
+    }
+}
+
+fn strong(t: &Tokens) -> Color32 {
+    if t.dark { Color32::WHITE } else { Color32::BLACK }
+}
+
+/// A task in the exam's task list: number, title, weight and a flag mark.
+fn task_row(
+    ui: &mut egui::Ui,
+    t: &Tokens,
+    n: usize,
+    title: &str,
+    weight: u32,
+    selected: bool,
+    flagged: bool,
+) -> egui::Response {
+    let width = ui.available_width();
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 38.0), egui::Sense::click());
+    let p = ui.painter();
+    if selected {
+        p.rect_filled(rect, 9.0, t.accent_soft);
+    } else if resp.hovered() {
+        p.rect_filled(rect, 9.0, t.card);
+    }
+    let badge = egui::Rect::from_center_size(egui::pos2(rect.min.x + 18.0, rect.center().y), egui::vec2(24.0, 24.0));
+    p.rect_filled(badge, 7.0, if selected { t.accent } else { t.card_hover });
+    p.text(
+        badge.center(),
+        egui::Align2::CENTER_CENTER,
+        n.to_string(),
+        egui::FontId::proportional(12.0),
+        if selected { t.bg } else { t.muted },
+    );
+    let text_w = width - if flagged { 104.0 } else { 84.0 };
+    let mut job = egui::text::LayoutJob::single_section(
+        title.to_string(),
+        egui::TextFormat {
+            font_id: egui::FontId::proportional(13.5),
+            color: if selected { t.accent } else { t.text },
+            ..Default::default()
+        },
+    );
+    job.wrap = egui::text::TextWrapping {
+        max_width: text_w,
+        max_rows: 1,
+        break_anywhere: true,
+        overflow_character: Some('…'),
+    };
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
+    p.galley(egui::pos2(rect.min.x + 38.0, rect.center().y - galley.size().y / 2.0), galley, t.text);
+    p.text(
+        egui::pos2(rect.max.x - 10.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        format!("{weight}%"),
+        egui::FontId::proportional(12.0),
+        t.muted,
+    );
+    if flagged {
+        icons::paint(
+            p,
+            egui::Rect::from_center_size(egui::pos2(rect.max.x - 46.0, rect.center().y), egui::vec2(14.0, 14.0)),
+            Icon::Flag,
+            t.amber,
+        );
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+fn short_domain(id: &str) -> &'static str {
+    match id {
+        "design-build" => "Design & Build",
+        "deployment" => "Deployment",
+        "observability" => "Observability",
+        "config-security" => "Config & Security",
+        "networking" => "Networking",
+        _ => "Other",
     }
 }

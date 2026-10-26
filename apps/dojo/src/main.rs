@@ -494,11 +494,15 @@ fn run_doctor(c: &Ctx) -> Result<(), String> {
                 Err(e) => println!("✗ machine  {}: {e}", t.name),
             }
             match cluster::status(&env) {
-                cluster::Status::Running { nodes } => println!(
-                    "✓ cluster  kind-poddojo, {} node(s), {}",
-                    nodes.len(),
-                    nodes.first().map_or("", |n| n.version.as_str())
-                ),
+                cluster::Status::Running { nodes } => {
+                    let server = nodes.first().map_or("", |n| n.version.as_str());
+                    println!("✓ cluster  kind-poddojo, {} node(s), {server}", nodes.len());
+                    let client =
+                        tools.iter().find(|t| t.name == "kubectl").and_then(|t| t.version.clone()).unwrap_or_default();
+                    if let Some(w) = doctor::kubectl_skew(&client, server) {
+                        println!("! kubectl  {w}");
+                    }
+                }
                 cluster::Status::Missing => println!("· cluster  not created yet: `dojo cluster up`"),
                 cluster::Status::Unreachable(e) => println!("✗ cluster  {e}"),
             }

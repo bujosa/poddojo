@@ -24,12 +24,6 @@ pub fn title(ui: &mut egui::Ui, t: &Tokens, text: &str, subtitle: &str) {
     ui.add_space(10.0);
 }
 
-pub fn section(ui: &mut egui::Ui, t: &Tokens, text: &str) {
-    ui.add_space(6.0);
-    ui.label(RichText::new(text).size(13.0).strong().color(t.muted));
-    ui.add_space(2.0);
-}
-
 pub fn accent_button(ui: &mut egui::Ui, t: &Tokens, text: &str) -> egui::Response {
     let fg = if t.dark { egui::Color32::from_rgb(4, 30, 28) } else { egui::Color32::WHITE };
     ui.add(egui::Button::new(RichText::new(text).strong().color(fg)).fill(t.accent).min_size(egui::vec2(0.0, 32.0)))
@@ -45,6 +39,7 @@ pub fn ago(ts: i64) -> String {
         0..60 => "just now".into(),
         60..3600 => format!("{} min ago", secs / 60),
         3600..86400 => format!("{} h ago", secs / 3600),
+        86400..172800 => "yesterday".into(),
         _ => format!("{} days ago", secs / 86400),
     }
 }

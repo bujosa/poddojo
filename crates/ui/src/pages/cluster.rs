@@ -63,7 +63,7 @@ impl App {
                         ui.label(RichText::new(format!("⚠ The cluster lives on {on}, but labs now run on {}. Switch back, or delete and recreate it here.", self.target_name())).color(t.amber));
                     }
                     ui.horizontal(|ui| {
-                        if ui.button("⟳ Refresh").clicked() {
+                        if crate::icons::button(ui, crate::icons::Icon::Refresh, "Refresh").clicked() {
                             self.refresh_cluster(ctx);
                             self.refresh_kube(ctx);
                         }
@@ -99,7 +99,7 @@ impl App {
                     ui.label(RichText::new(e).color(t.muted));
                     ui.label("Is the machine on and Docker running? If the cluster's containers were removed, delete and recreate it.");
                     ui.horizontal(|ui| {
-                        if ui.button("⟳ Retry").clicked() {
+                        if crate::icons::button(ui, crate::icons::Icon::Refresh, "Retry").clicked() {
                             self.refresh_cluster(ctx);
                         }
                         if ui.add_enabled(!busy, egui::Button::new(RichText::new("Delete cluster").color(t.bad))).clicked() {
@@ -199,7 +199,7 @@ impl App {
                     }
                 }
             });
-            if ui.button("⟳").on_hover_text("Refresh").clicked() {
+            if crate::icons::button(ui, crate::icons::Icon::Refresh, "").on_hover_text("Refresh").clicked() {
                 reload = true;
             }
             if self.jobs.busy("kube") {

@@ -2,6 +2,7 @@
 //! things on background threads (`jobs`), and draws the result.
 
 mod console;
+pub mod icons;
 pub mod jobs;
 mod logo;
 pub mod markdown;
@@ -22,6 +23,7 @@ use poddojo_runner::targets::{self, EngineInfo, Target};
 use poddojo_runner::{LabEnv, Paths, Settings};
 
 use console::Console;
+use icons::Icon;
 use jobs::{Done, Jobs};
 use theme::Tokens;
 
@@ -37,14 +39,14 @@ pub enum Page {
 }
 
 impl Page {
-    const ALL: [(Page, &'static str, &'static str); 7] = [
-        (Page::Home, "🏠", "Home"),
-        (Page::Learn, "📖", "Learn"),
-        (Page::Docker, "🐳", "Docker"),
-        (Page::Cluster, "☸", "Cluster"),
-        (Page::Exams, "⏱", "Exams"),
-        (Page::Progress, "📈", "Progress"),
-        (Page::Setup, "⚙", "Setup"),
+    const ALL: [(Page, Icon, &'static str); 7] = [
+        (Page::Home, Icon::Home, "Home"),
+        (Page::Learn, Icon::Book, "Learn"),
+        (Page::Docker, Icon::Container, "Docker"),
+        (Page::Cluster, Icon::Cluster, "Cluster"),
+        (Page::Exams, Icon::Stopwatch, "Exams"),
+        (Page::Progress, Icon::Chart, "Progress"),
+        (Page::Setup, Icon::Gear, "Setup"),
     ];
 }
 
@@ -68,6 +70,10 @@ pub struct LearnState {
     pub opened_at: Option<Instant>,
     pub lab_log: String,
     pub scroll_to_top: bool,
+    /// Lab steps the learner unfolded besides the current one.
+    pub expanded: BTreeSet<usize>,
+    /// The lab was prepared in this session.
+    pub prepared: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -127,6 +133,8 @@ pub struct Drill {
 }
 
 pub struct App {
+    /// Lesson list filter on the Learn page.
+    pub tree_filter: String,
     pub paths: Paths,
     pub settings: Settings,
     pub catalog: Catalog,
@@ -154,6 +162,9 @@ pub struct App {
     /// Modification time of progress.json when we last read or wrote it: the `dojo` CLI may change
     /// it while the app is open, and the app must build on that instead of overwriting it.
     progress_stamp: Option<std::time::SystemTime>,
+    demo_ran: bool,
+    /// Machines were tested since the Setup page was opened.
+    pub setup_probed: bool,
     /// `PODDOJO_SCREENSHOT=<png>`: capture this window after the first jobs settle, then quit
     /// (with `PODDOJO_PAGE=home|learn:<lesson>[:quiz|:lab]|docker|cluster|exams|progress|setup`).
     shot: Option<(std::path::PathBuf, Instant, bool)>,
@@ -189,6 +200,7 @@ impl App {
         theme::apply(ctx, &t, settings.zoom);
         let cluster_record = ClusterRecord::load(&paths);
         let mut app = Self {
+            tree_filter: String::new(),
             paths,
             settings,
             catalog,
@@ -214,6 +226,8 @@ impl App {
             last_minute: Instant::now(),
             started: false,
             progress_stamp: None,
+            demo_ran: false,
+            setup_probed: false,
             shot: std::env::var_os("PODDOJO_SCREENSHOT").map(|p| (std::path::PathBuf::from(p), Instant::now(), false)),
         };
         if let Ok(page) = std::env::var("PODDOJO_PAGE") {
@@ -337,8 +351,10 @@ impl App {
             self.toast("No machine with Docker found: see Setup", false);
             return;
         };
-        self.console.open = true;
-        let entry = self.console.push(cmd);
+        if !self.in_workspace() {
+            self.console.open = true;
+        }
+        let entry = self.console.push(cmd, console::Console::place_label(Some(&env), &self.target_name()));
         let cmd = cmd.to_string();
         let id = self.jobs.spawn(ctx, format!("console {entry}"), move |live| Done::Console {
             entry,
@@ -366,6 +382,7 @@ impl App {
             Done::Prepared { lesson, ok, log } => {
                 if self.learn.lesson.as_deref() == Some(lesson.as_str()) {
                     self.learn.lab_log = log;
+                    self.learn.prepared = ok;
                 }
                 self.toast(
                     if ok {
@@ -548,6 +565,48 @@ impl App {
         ctx.request_repaint_after(Duration::from_millis(100));
     }
 
+    /// ⌘1–⌘7 switch pages, ⌘J toggles the console, ⌘T opens a real terminal.
+    fn shortcuts(&mut self, ctx: &egui::Context) {
+        let (page, console, terminal) = ctx.input_mut(|i| {
+            let mut page = None;
+            for (n, key) in [
+                egui::Key::Num1,
+                egui::Key::Num2,
+                egui::Key::Num3,
+                egui::Key::Num4,
+                egui::Key::Num5,
+                egui::Key::Num6,
+                egui::Key::Num7,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if i.consume_key(egui::Modifiers::COMMAND, key) {
+                    page = Page::ALL.get(n).map(|p| p.0);
+                }
+            }
+            (
+                page,
+                i.consume_key(egui::Modifiers::COMMAND, egui::Key::J),
+                i.consume_key(egui::Modifiers::COMMAND, egui::Key::T),
+            )
+        });
+        if let Some(p) = page {
+            self.page = p;
+        }
+        if console {
+            if self.in_workspace() {
+                self.console.focus = true;
+            } else {
+                self.console.open = !self.console.open;
+                self.console.focus = self.console.open;
+            }
+        }
+        if terminal {
+            self.open_terminal();
+        }
+    }
+
     fn tick_study_time(&mut self) {
         if self.last_minute.elapsed() >= Duration::from_secs(60) {
             self.last_minute = Instant::now();
@@ -581,15 +640,21 @@ impl App {
                     ui.label(RichText::new("Docker + CKAD").size(12.0).color(t.muted));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let ctx = ui.ctx().clone();
-                        if ui
-                            .button("🖥 Open terminal")
-                            .on_hover_text("A real shell with DOCKER_CONTEXT and KUBECONFIG set for the lab")
+                        if icons::button(ui, Icon::Terminal, "Open terminal")
+                            .on_hover_text("A real shell with DOCKER_CONTEXT and KUBECONFIG set for the lab (⌘T)")
                             .clicked()
                         {
                             self.open_terminal();
                         }
-                        let console_label = if self.console.open { "⌨ Hide console" } else { "⌨ Console" };
-                        if ui.button(console_label).clicked() {
+                        if !self.in_workspace()
+                            && icons::button(
+                                ui,
+                                Icon::Console,
+                                if self.console.open { "Hide console" } else { "Console" },
+                            )
+                            .on_hover_text("The built-in terminal (⌘J)")
+                            .clicked()
+                        {
                             self.console.open = !self.console.open;
                         }
                         ui.separator();
@@ -599,6 +664,56 @@ impl App {
                     });
                 });
             });
+    }
+
+    /// The Lab tab of a lesson and a running exam are full workspaces with their own terminal pane.
+    pub fn in_workspace(&self) -> bool {
+        (self.page == Page::Learn && self.learn.tab == LessonTab::Lab && self.learn.lesson.is_some())
+            || (self.page == Page::Exams && self.progress.active_exam.is_some())
+    }
+
+    /// One-click commands that fit what the learner is doing.
+    pub fn terminal_chips(&self) -> Vec<String> {
+        if let Some(a) = &self.progress.active_exam {
+            let ns = self
+                .catalog
+                .exam(&a.exam_id)
+                .and_then(|e| e.tasks.get(self.exam.task))
+                .and_then(|t| t.namespace.clone());
+            return match ns {
+                Some(ns) => vec![
+                    format!("kubectl -n {ns} get all"),
+                    format!("kubectl -n {ns} get events --sort-by=.lastTimestamp"),
+                    "kubectl get ns".into(),
+                ],
+                None => vec!["kubectl get ns".into(), "kubectl get all -A".into()],
+            };
+        }
+        let lesson = self.learn.lesson.as_ref().and_then(|id| self.catalog.lesson(id));
+        match lesson.map(|l| l.needs) {
+            Some(poddojo_core::Needs::Cluster) => vec![
+                "kubectl get pods -A".into(),
+                "kubectl get events -A --sort-by=.lastTimestamp".into(),
+                "kubectl api-resources --namespaced=true".into(),
+            ],
+            _ => vec!["docker ps -a".into(), "docker images".into(), "docker network ls".into()],
+        }
+    }
+
+    /// Draw the terminal in `ui` and act on what the learner does with it.
+    pub fn terminal(&mut self, ui: &mut egui::Ui, chips: &[String]) {
+        let t = self.t;
+        let env = self.console_env();
+        let machine = self.target_name();
+        let chips: Vec<&str> = chips.iter().map(String::as_str).collect();
+        match self.console.ui(ui, &t, &self.jobs, env.as_ref(), &machine, &chips) {
+            Some(console::Action::Run(cmd)) => {
+                let ctx = ui.ctx().clone();
+                self.run_in_console(&ctx, &cmd);
+            }
+            Some(console::Action::OpenTerminal) => self.open_terminal(),
+            None => {}
+        }
     }
 
     pub fn open_terminal(&mut self) {
@@ -622,10 +737,7 @@ impl App {
         };
         let mut pick = None;
         egui::ComboBox::from_id_salt("machine")
-            .selected_text(
-                RichText::new(format!("🖧 {}", current.as_ref().map_or("choose a machine", |c| c.name.as_str())))
-                    .strong(),
-            )
+            .selected_text(RichText::new(current.as_ref().map_or("choose a machine", |c| c.name.as_str())).strong())
             .width(170.0)
             .show_ui(ui, |ui| {
                 for target in &self.targets {
@@ -645,7 +757,7 @@ impl App {
             .on_hover_text(tip);
         let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
         ui.painter().circle_filled(rect.center(), 4.5, dot);
-        ui.label(RichText::new("Machine").size(12.0).color(t.muted));
+        icons::show(ui, Icon::Server, 16.0, t.muted);
         if let Some(name) = pick {
             self.select_target(ctx, &name);
         }
@@ -655,11 +767,11 @@ impl App {
         let t = self.t;
         let (color, text) = match &self.cluster {
             Some(Status::Running { nodes }) => {
-                (t.good, format!("☸ kind-poddojo {}", nodes.first().map_or("", |n| n.version.as_str())))
+                (t.good, format!("kind-poddojo {}", nodes.first().map_or("", |n| n.version.as_str())))
             }
-            Some(Status::Missing) => (t.muted, "☸ no lab cluster".into()),
-            Some(Status::Unreachable(_)) => (t.bad, "☸ cluster unreachable".into()),
-            None => (t.muted, "☸ …".into()),
+            Some(Status::Missing) => (t.muted, "no lab cluster".into()),
+            Some(Status::Unreachable(_)) => (t.bad, "cluster unreachable".into()),
+            None => (t.muted, "cluster…".into()),
         };
         if ui
             .add(egui::Button::new(RichText::new(text).color(color)).frame(false))
@@ -668,6 +780,7 @@ impl App {
         {
             self.page = Page::Cluster;
         }
+        icons::show(ui, Icon::Cluster, 16.0, color);
     }
 
     fn nav(&mut self, ui: &mut egui::Ui) {
@@ -676,24 +789,18 @@ impl App {
             .exact_size(168.0)
             .frame(egui::Frame::new().fill(t.panel).inner_margin(egui::Margin::symmetric(10, 14)))
             .show(ui, |ui| {
-                for (page, icon, label) in Page::ALL {
-                    let selected = self.page == page;
-                    let text = RichText::new(format!("{icon}  {label}")).size(15.0).color(if selected {
-                        t.accent
-                    } else {
-                        t.text
-                    });
-                    let resp = ui.add_sized(
-                        [148.0, 34.0],
-                        egui::Button::new(text)
-                            .fill(if selected { t.accent_soft } else { Color32::TRANSPARENT })
-                            .stroke(egui::Stroke::NONE),
-                    );
-                    if resp.clicked() {
+                ui.add_space(4.0);
+                for (i, (page, icon, label)) in Page::ALL.into_iter().enumerate() {
+                    if nav_item(ui, &t, icon, label, self.page == page, &format!("⌘{}", i + 1)).clicked() {
                         self.page = page;
                     }
                     if page == Page::Exams && self.progress.active_exam.is_some() {
-                        ui.label(RichText::new("   ● exam running").size(11.0).color(t.amber));
+                        ui.horizontal(|ui| {
+                            ui.add_space(40.0);
+                            let (r, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+                            ui.painter().circle_filled(r.center(), 3.5, t.amber);
+                            ui.label(RichText::new("exam running").size(11.0).color(t.amber));
+                        });
                     }
                 }
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
@@ -702,7 +809,7 @@ impl App {
                     theme::bar(ui, &t, if total == 0 { 0.0 } else { done as f32 / total as f32 }, 148.0, t.accent);
                     let streak = self.progress.streak(chrono::Local::now().date_naive());
                     if streak > 0 {
-                        ui.label(RichText::new(format!("🔥 {streak}-day streak")).size(12.0).color(t.amber));
+                        ui.label(RichText::new(format!("{streak}-day streak")).size(12.0).color(t.amber));
                     }
                 });
             });
@@ -739,28 +846,40 @@ impl App {
             self.started = true;
             self.refresh_targets(&ctx);
         }
+        // Development aid for screenshots and demos: `PODDOJO_RUN="cmd1;;cmd2"` runs commands in the
+        // terminal once the machine is known.
+        if !self.demo_ran && self.target().is_some() {
+            self.demo_ran = true;
+            if let Ok(cmds) = std::env::var("PODDOJO_RUN") {
+                for cmd in cmds.split(";;").map(str::trim).filter(|c| !c.is_empty()) {
+                    self.run_in_console(&ctx, cmd);
+                }
+            }
+        }
         self.sync_progress();
+        self.shortcuts(&ctx);
         for done in self.jobs.poll() {
             self.handle(&ctx, done);
         }
         self.tick_study_time();
         self.top_bar(ui);
         self.nav(ui);
-        if self.console.open {
+        if self.console.open && !self.in_workspace() {
             let t = self.t;
-            let mut run = None;
             egui::Panel::bottom("console")
                 .resizable(true)
-                .default_size(230.0)
-                .min_size(120.0)
-                .frame(egui::Frame::new().fill(t.code_bg).inner_margin(egui::Margin::same(10)))
+                .default_size(260.0)
+                .min_size(140.0)
+                .frame(egui::Frame::new().fill(t.bg).inner_margin(egui::Margin {
+                    left: 14,
+                    right: 14,
+                    top: 8,
+                    bottom: 12,
+                }))
                 .show(ui, |ui| {
-                    let env = self.console_env();
-                    run = self.console.ui(ui, &t, &self.jobs, env.as_ref(), &self.target_name());
+                    let chips = self.terminal_chips();
+                    self.terminal(ui, &chips);
                 });
-            if let Some(cmd) = run {
-                self.run_in_console(&ctx, &cmd);
-            }
         }
         let t = self.t;
         egui::CentralPanel::default()
@@ -794,4 +913,48 @@ impl App {
 
 fn progress_mtime(paths: &Paths) -> Option<std::time::SystemTime> {
     std::fs::metadata(paths.progress()).and_then(|m| m.modified()).ok()
+}
+
+/// A navigation row: icon + label, accent bar and soft fill when selected.
+fn nav_item(ui: &mut egui::Ui, t: &Tokens, icon: Icon, label: &str, selected: bool, shortcut: &str) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 38.0), egui::Sense::click());
+    let hovered = resp.hovered();
+    let p = ui.painter();
+    if selected {
+        p.rect_filled(rect, 9.0, t.accent_soft);
+        p.rect_filled(egui::Rect::from_min_size(rect.min + egui::vec2(0.0, 9.0), egui::vec2(3.0, 20.0)), 2.0, t.accent);
+    } else if hovered {
+        p.rect_filled(rect, 9.0, t.card);
+    }
+    let color = if selected {
+        t.accent
+    } else if hovered {
+        t.text
+    } else {
+        t.muted
+    };
+    icons::paint(
+        p,
+        egui::Rect::from_center_size(egui::pos2(rect.min.x + 24.0, rect.center().y), egui::vec2(18.0, 18.0)),
+        icon,
+        color,
+    );
+    p.text(
+        egui::pos2(rect.min.x + 44.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(15.0),
+        if selected || hovered { t.text } else { t.muted },
+    );
+    if hovered {
+        p.text(
+            egui::pos2(rect.max.x - 10.0, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            shortcut,
+            egui::FontId::proportional(11.0),
+            t.muted,
+        );
+    }
+    ui.add_space(2.0);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
