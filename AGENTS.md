@@ -45,6 +45,9 @@ hands-on labs, take timed mock exams, and always resume where they stopped. Ever
   Docker's, Kubernetes' or the Linux Foundation's logos or artwork.
 
 ## Quality gates (before every commit)
+There is no hosted CI (GitHub Actions is disabled): the gates below run locally and are required
+before every merge and release, as described in [`docs/releasing.md`](docs/releasing.md).
+
 `cargo xtask ci` = fmt check, clippy `-D warnings`, tests, content validation. For content also run
 `dojo verify` on what you changed (see docs/content-authoring.md). Conventional Commits.
 

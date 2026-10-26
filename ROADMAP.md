@@ -5,6 +5,8 @@
 `dojo verify`.
 
 ## Done
+- v0.2.0: grader audit (negative and alternative verification cases), a working Ingress
+  controller, behavioural NetworkPolicy grading.
 - Profiles: a welcome screen ("Who's training today?"), several learners per computer, guest
   mode, resumable lab sessions (prepared state, hints, last checks), labs in progress on Home.
 - Workspace: lab steps beside a terminal pane; exam workspace with timer, flags and terminal.
