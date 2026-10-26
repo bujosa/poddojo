@@ -5,6 +5,7 @@ mod console;
 pub mod icons;
 pub mod jobs;
 mod logo;
+pub mod mark;
 pub mod markdown;
 mod pages;
 pub mod theme;
@@ -178,6 +179,8 @@ pub struct App {
     /// it while the app is open, and the app must build on that instead of overwriting it.
     progress_stamp: Option<std::time::SystemTime>,
     demo_ran: bool,
+    /// A short celebration overlay: (started, headline, detail).
+    pub celebrate: Option<(Instant, String, String)>,
     /// Machines were tested since the Setup page was opened.
     pub setup_probed: bool,
     /// `PODDOJO_SCREENSHOT=<png>`: capture this window after the first jobs settle, then quit
@@ -195,7 +198,7 @@ impl App {
         };
         let profiles = Profiles::load(&paths);
         let t = Tokens::get(settings.dark);
-        theme::apply(ctx, &t, settings.zoom);
+        theme::apply(ctx, &t, settings.zoom, settings.motion);
         let cluster_record = ClusterRecord::load(&paths);
         let mut app = Self {
             tree_filter: String::new(),
@@ -228,6 +231,7 @@ impl App {
             started: false,
             progress_stamp: None,
             demo_ran: false,
+            celebrate: None,
             setup_probed: false,
             shot: std::env::var_os("PODDOJO_SCREENSHOT").map(|p| (std::path::PathBuf::from(p), Instant::now(), false)),
         };
@@ -482,7 +486,8 @@ impl App {
                     self.progress.record_results(&l, step, results.clone());
                     self.save_progress();
                     if !was_done && self.progress.is_done(&l) {
-                        self.toast(format!("🥋 Lesson complete: {}", l.title), true);
+                        self.toast(format!("Lesson complete: {}", l.title), true);
+                        self.celebrate = Some((Instant::now(), "Lesson complete".into(), l.title.clone()));
                     }
                 }
                 if self.learn.lesson.as_deref() == Some(lesson.as_str()) {
@@ -579,6 +584,9 @@ impl App {
                 self.progress.record_exam(attempt);
                 self.save_progress();
                 self.toast(format!("Score {percent:.0}%: {}", if passed { "PASS" } else { "keep training" }), passed);
+                if passed {
+                    self.celebrate = Some((Instant::now(), format!("{percent:.0}% · PASS"), "Mock exam passed".into()));
+                }
             }
         }
     }
@@ -627,6 +635,17 @@ impl App {
             self.shot = None;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
+        }
+        // Development aid: `PODDOJO_CELEBRATE=1` shows the celebration just before the capture.
+        if std::env::var_os("PODDOJO_CELEBRATE").is_some()
+            && self.celebrate.is_none()
+            && since.elapsed() > Duration::from_secs(3)
+        {
+            self.celebrate = Some((
+                Instant::now() - Duration::from_millis(600),
+                "Lesson complete".into(),
+                "Build and deliver images to Kubernetes".into(),
+            ));
         }
         let settled = since.elapsed() > Duration::from_secs(4) && self.jobs.running.is_empty();
         if !requested && (settled || since.elapsed() > Duration::from_secs(25)) {
@@ -703,9 +722,10 @@ impl App {
             .frame(egui::Frame::new().fill(t.panel).inner_margin(egui::Margin::symmetric(14, 8)))
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
-                    if let Some(tex) = &self.logo {
-                        ui.add(egui::Image::new(tex).fit_to_exact_size(egui::vec2(32.0, 32.0)).corner_radius(7.0));
-                    }
+                    // The living mark: still when idle, alive while commands run (or on hover).
+                    let energy = if self.jobs.running.is_empty() { 0.0 } else { 1.0 };
+                    mark::show(ui, 34.0, energy, true, self.settings.motion)
+                        .on_hover_text(if self.jobs.running.is_empty() { "PodDojo" } else { "Working…" });
                     ui.label(RichText::new("PodDojo").size(19.0).strong().color(if t.dark {
                         Color32::WHITE
                     } else {
@@ -864,8 +884,26 @@ impl App {
             .frame(egui::Frame::new().fill(t.panel).inner_margin(egui::Margin::symmetric(10, 14)))
             .show(ui, |ui| {
                 ui.add_space(4.0);
+                // The selection highlight slides between items (positions from the last frame).
+                let rects_id = egui::Id::new("nav-rects");
+                let rects: Vec<egui::Rect> = ui.ctx().data(|d| d.get_temp(rects_id)).unwrap_or_default();
+                let sel = Page::ALL.iter().position(|p| p.0 == self.page);
+                let sliding = sel.and_then(|i| rects.get(i)).is_some();
+                if let Some(r) = sel.and_then(|i| rects.get(i)) {
+                    let y = ui.ctx().animate_value_with_time(egui::Id::new("nav-sel-y"), r.min.y, 0.22);
+                    let hr = egui::Rect::from_min_size(egui::pos2(r.min.x, y), r.size());
+                    ui.painter().rect_filled(hr, 9.0, t.accent_soft);
+                    ui.painter().rect_filled(
+                        egui::Rect::from_min_size(hr.min + egui::vec2(0.0, 9.0), egui::vec2(3.0, 20.0)),
+                        2.0,
+                        t.accent,
+                    );
+                }
+                let mut new_rects = Vec::new();
                 for (i, (page, icon, label)) in Page::ALL.into_iter().enumerate() {
-                    if nav_item(ui, &t, icon, label, self.page == page, &format!("⌘{}", i + 1)).clicked() {
+                    let resp = nav_item(ui, &t, icon, label, self.page == page, !sliding, &format!("⌘{}", i + 1));
+                    new_rects.push(resp.rect);
+                    if resp.clicked() {
                         self.page = page;
                     }
                     if page == Page::Exams && self.progress.active_exam.is_some() {
@@ -877,6 +915,7 @@ impl App {
                         });
                     }
                 }
+                ui.ctx().data_mut(|d| d.insert_temp(rects_id, new_rects));
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
                     if let Some(p) = self.profile.clone()
                         && profile_chip(ui, &t, &p).on_hover_text("Switch profile").clicked()
@@ -904,7 +943,12 @@ impl App {
         egui::Area::new(egui::Id::new("toasts")).anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -16.0)).show(
             ctx,
             |ui| {
-                for (text, ok, _) in &self.toasts {
+                for (text, ok, at) in &self.toasts {
+                    let age = at.elapsed().as_secs_f32();
+                    let enter = if self.settings.motion { (age / 0.25).clamp(0.0, 1.0) } else { 1.0 };
+                    let leave = if self.settings.motion { ((5.0 - age) / 0.4).clamp(0.0, 1.0) } else { 1.0 };
+                    ui.add_space((1.0 - enter) * 24.0);
+                    ui.set_opacity(enter.min(leave));
                     egui::Frame::new()
                         .fill(t.card)
                         .stroke(egui::Stroke::new(1.0, if *ok { t.good } else { t.bad }))
@@ -917,7 +961,7 @@ impl App {
                 }
             },
         );
-        ctx.request_repaint_after(Duration::from_millis(500));
+        ctx.request_repaint_after(Duration::from_millis(if self.settings.motion { 16 } else { 500 }));
     }
 
     pub fn frame(&mut self, ui: &mut egui::Ui) {
@@ -998,10 +1042,63 @@ impl App {
                 }
             });
         self.toasts(&ctx);
+        self.celebration(&ctx);
         self.screenshot(&ctx);
         if !self.jobs.running.is_empty() {
             ctx.request_repaint_after(Duration::from_millis(150));
         }
+    }
+
+    /// The living mark bursting with rings for a moment after a lesson is completed or an exam
+    /// passed.
+    fn celebration(&mut self, ctx: &egui::Context) {
+        let Some((at, headline, detail)) = self.celebrate.clone() else { return };
+        let age = at.elapsed().as_secs_f32();
+        if age > 2.4 || !self.settings.motion {
+            self.celebrate = None;
+            return;
+        }
+        let t = self.t;
+        let fade = (age / 0.2).min(1.0).min(((2.4 - age) / 0.5).clamp(0.0, 1.0));
+        let screen = ctx.content_rect();
+        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("celebrate")));
+        let c = screen.center();
+        for i in 0..3 {
+            let r = (age - i as f32 * 0.18).max(0.0) * 260.0;
+            let a = (1.0 - r / 520.0).clamp(0.0, 1.0) * fade;
+            painter.circle_stroke(c, r, egui::Stroke::new(3.0, t.accent.gamma_multiply(a * 0.8)));
+        }
+        let card = egui::Rect::from_center_size(c, egui::vec2(320.0, 220.0));
+        painter.rect_filled(card, 20.0, t.card.gamma_multiply(fade));
+        painter.rect_stroke(
+            card,
+            20.0,
+            egui::Stroke::new(1.5, t.accent.gamma_multiply(fade)),
+            egui::StrokeKind::Inside,
+        );
+        let scale = 0.7 + 0.3 * (age / 0.35).min(1.0);
+        mark::paint(
+            &painter,
+            egui::Rect::from_center_size(c - egui::vec2(0.0, 30.0), egui::vec2(110.0 * scale, 110.0 * scale)),
+            ctx.input(|i| i.time),
+            1.0,
+            false,
+        );
+        painter.text(
+            c + egui::vec2(0.0, 50.0),
+            egui::Align2::CENTER_CENTER,
+            headline,
+            egui::FontId::proportional(22.0),
+            t.text.gamma_multiply(fade),
+        );
+        painter.text(
+            c + egui::vec2(0.0, 78.0),
+            egui::Align2::CENTER_CENTER,
+            detail,
+            egui::FontId::proportional(13.0),
+            t.muted.gamma_multiply(fade),
+        );
+        ctx.request_repaint_after(Duration::from_millis(16));
     }
 }
 
@@ -1010,15 +1107,24 @@ fn progress_mtime(paths: &Paths) -> Option<std::time::SystemTime> {
 }
 
 /// A navigation row: icon + label, accent bar and soft fill when selected.
-fn nav_item(ui: &mut egui::Ui, t: &Tokens, icon: Icon, label: &str, selected: bool, shortcut: &str) -> egui::Response {
+fn nav_item(
+    ui: &mut egui::Ui,
+    t: &Tokens,
+    icon: Icon,
+    label: &str,
+    selected: bool,
+    paint_selection: bool,
+    shortcut: &str,
+) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 38.0), egui::Sense::click());
     let hovered = resp.hovered();
+    let hover = ui.ctx().animate_bool_with_time(resp.id.with("hover"), hovered && !selected, 0.12);
     let p = ui.painter();
-    if selected {
+    if selected && paint_selection {
         p.rect_filled(rect, 9.0, t.accent_soft);
         p.rect_filled(egui::Rect::from_min_size(rect.min + egui::vec2(0.0, 9.0), egui::vec2(3.0, 20.0)), 2.0, t.accent);
-    } else if hovered {
-        p.rect_filled(rect, 9.0, t.card);
+    } else if hover > 0.0 {
+        p.rect_filled(rect, 9.0, t.card.gamma_multiply(hover));
     }
     let color = if selected {
         t.accent

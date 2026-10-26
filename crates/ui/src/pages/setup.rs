@@ -199,6 +199,11 @@ impl App {
                 ui.separator();
                 ui.label("Zoom");
                 changed |= ui.add(egui::Slider::new(&mut self.settings.zoom, 0.75..=1.6).step_by(0.05)).changed();
+                ui.separator();
+                changed |= ui
+                    .checkbox(&mut self.settings.motion, "Animations")
+                    .on_hover_text("The living logo and transitions. Turn off for reduced motion.")
+                    .changed();
             });
             ui.horizontal(|ui| {
                 changed |= ui.checkbox(&mut self.settings.worker, "Lab cluster with a worker node").changed();
@@ -218,7 +223,7 @@ impl App {
             );
             if changed {
                 self.t = Tokens::get(self.settings.dark);
-                theme::apply(ctx, &self.t, self.settings.zoom);
+                theme::apply(ctx, &self.t, self.settings.zoom, self.settings.motion);
                 self.save_settings();
             }
             ui.add_space(6.0);

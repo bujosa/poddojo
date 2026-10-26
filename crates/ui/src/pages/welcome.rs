@@ -27,6 +27,9 @@ impl App {
             }
         }
         let loaded = self.welcome.loaded.clone().unwrap_or_default();
+        // A living cluster in the background.
+        let time = if self.settings.motion { ui.input(|i| i.time) } else { 0.0 };
+        crate::mark::node_field(ui.painter(), ui.max_rect(), time, t.accent);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             let width = ui.available_width().min(900.0);
             let pad = ((ui.available_width() - width) / 2.0).max(0.0);
@@ -36,9 +39,7 @@ impl App {
                     ui.set_width(width);
                     ui.add_space(28.0);
                     ui.vertical_centered(|ui| {
-                        if let Some(tex) = &self.logo {
-                            ui.add(egui::Image::new(tex).fit_to_exact_size(egui::vec2(88.0, 88.0)).corner_radius(20.0));
-                        }
+                        crate::mark::show(ui, 112.0, 0.0, true, self.settings.motion);
                         ui.add_space(8.0);
                         ui.label(RichText::new("PodDojo").size(36.0).strong().color(strong(&t)));
                         ui.label(

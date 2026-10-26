@@ -66,7 +66,7 @@ impl Tokens {
     }
 }
 
-pub fn apply(ctx: &egui::Context, t: &Tokens, zoom: f32) {
+pub fn apply(ctx: &egui::Context, t: &Tokens, zoom: f32, motion: bool) {
     let mut v = if t.dark { Visuals::dark() } else { Visuals::light() };
     v.panel_fill = t.panel;
     v.window_fill = t.card;
@@ -95,6 +95,7 @@ pub fn apply(ctx: &egui::Context, t: &Tokens, zoom: f32) {
     ctx.set_zoom_factor(zoom.clamp(0.6, 2.0));
     ctx.all_styles_mut(|s| {
         s.spacing.item_spacing = egui::vec2(8.0, 7.0);
+        s.animation_time = if motion { 0.22 } else { 0.0 };
         s.spacing.button_padding = egui::vec2(12.0, 6.0);
         s.spacing.window_margin = Margin::same(14);
         s.text_styles.insert(TextStyle::Heading, FontId::new(24.0, FontFamily::Proportional));
@@ -126,7 +127,10 @@ pub fn chip(ui: &mut egui::Ui, text: &str, fg: Color32, bg: Color32) {
 
 /// A thin progress bar in the accent colour.
 pub fn bar(ui: &mut egui::Ui, t: &Tokens, fraction: f32, width: f32, color: Color32) {
+    let id = ui.next_auto_id();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 8.0), egui::Sense::hover());
+    // Bars grow into place instead of popping.
+    let fraction = ui.ctx().animate_value_with_time(id.with("bar"), fraction.clamp(0.0, 1.0), 0.6);
     let p = ui.painter();
     p.rect_filled(rect, CornerRadius::same(4), t.border);
     let mut fill = rect;
@@ -244,7 +248,9 @@ pub fn tab(ui: &mut egui::Ui, t: &Tokens, label: &str, selected: bool, done: boo
 
 /// A progress ring with a label in the middle.
 pub fn ring(ui: &mut egui::Ui, t: &Tokens, fraction: f32, size: f32, label: &str, sub: &str, color: Color32) {
+    let id = ui.next_auto_id();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    let fraction = ui.ctx().animate_value_with_time(id.with("ring"), fraction.clamp(0.0, 1.0), 0.9);
     let c = rect.center();
     let r = size / 2.0 - 6.0;
     let p = ui.painter();
