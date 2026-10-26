@@ -8,6 +8,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use poddojo_core::{Catalog, CheckResult, Exam, Lesson, LessonStatus, Needs, Progress, QuizScore, exam, now};
+use poddojo_runner::profiles::{self, Profile, Profiles};
 use poddojo_runner::{LabEnv, Paths, Settings, Target, cluster, doctor, lab, targets, terminal};
 
 const HELP: &str = "\
@@ -31,6 +32,11 @@ Exams (timed, performance-based, like the real CKAD)
   exam grade               Stop the clock and grade every task
   exam abandon             Stop without grading
 
+Profiles (the app's \"Who's training today?\")
+  profiles                 List profiles; the current one is marked
+  profile new <name>       Create a profile and switch to it
+  profile use <id>         Study as another profile (or set PODDOJO_PROFILE; `guest` for guest mode)
+
 Environment
   targets                  Machines that can run Docker (your Docker contexts)
   use <machine>            Run labs on that machine
@@ -45,6 +51,63 @@ Authoring
                            Prepare, apply the worked solutions, grade, then clean up
 ";
 
+/// The profile the CLI acts as: `PODDOJO_PROFILE` (id or name), else the one used last in the app,
+/// else a new profile named after the person logged in.
+fn active_profile(base: &Paths) -> Result<(Paths, Profile), String> {
+    let mut profiles = Profiles::load(base);
+    let chosen = match std::env::var("PODDOJO_PROFILE") {
+        Ok(who) if who == profiles::GUEST => return Ok((profiles.start_guest(), Profile::guest())),
+        Ok(who) => {
+            Some(profiles.find(&who).cloned().ok_or_else(|| format!("no profile `{who}` (see `dojo profiles`)"))?)
+        }
+        Err(_) => profiles.last().or_else(|| profiles.list().first()).cloned(),
+    };
+    let profile = match chosen {
+        Some(p) => p,
+        None => profiles.create(&profiles::system_name()).map_err(|e| e.to_string())?,
+    };
+    Ok((profiles.paths_for(&profile), profile))
+}
+
+fn profiles_cmd(args: &[&str]) -> Result<(), String> {
+    let base = Paths::discover();
+    let mut profiles = Profiles::load(&base);
+    match args {
+        [] => {
+            let current = active_profile(&base).map(|(_, p)| p.id).unwrap_or_default();
+            for p in profiles.list() {
+                let progress = Progress::load(&profiles.paths_for(p).progress()).unwrap_or_default();
+                let mark = if p.id == current { "▶" } else { " " };
+                println!(
+                    "{mark} {:<20} {:<24} last active {}",
+                    p.id,
+                    p.name,
+                    progress.last_active().map_or("never".into(), |t| chrono::DateTime::from_timestamp(t, 0)
+                        .map_or(String::new(), |d| d.format("%Y-%m-%d").to_string()))
+                );
+            }
+            println!(
+                "
+Switch with `dojo profile use <id>`, create with `dojo profile new <name>`, or set PODDOJO_PROFILE."
+            );
+            Ok(())
+        }
+        ["new", name @ ..] if !name.is_empty() => {
+            let p = profiles.create(&name.join(" ")).map_err(|e| e.to_string())?;
+            profiles.set_last(&p.id).map_err(|e| e.to_string())?;
+            println!("created `{}` ({}) and made it the current profile", p.name, p.id);
+            Ok(())
+        }
+        ["use", who] => {
+            let p = profiles.find(who).cloned().ok_or_else(|| format!("no profile `{who}`"))?;
+            profiles.set_last(&p.id).map_err(|e| e.to_string())?;
+            println!("now studying as {}", p.name);
+            Ok(())
+        }
+        _ => Err("usage: dojo profiles | dojo profile new <name> | dojo profile use <id>".into()),
+    }
+}
+
 struct Ctx {
     paths: Paths,
     settings: Settings,
@@ -54,8 +117,9 @@ struct Ctx {
 
 impl Ctx {
     fn load() -> Result<Self, String> {
-        let paths = Paths::discover();
-        let settings = Settings::load(&paths.settings());
+        let base = Paths::discover();
+        let (paths, _) = active_profile(&base)?;
+        let settings = Settings::load(&base.settings());
         let catalog =
             Catalog::load().map_err(|errs| errs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("\n"))?;
         let progress = Progress::load(&paths.progress()).map_err(|e| format!("could not read progress: {e}"))?;
@@ -101,6 +165,8 @@ fn dispatch(args: &[&str]) -> Result<(), String> {
             print!("{HELP}");
             Ok(())
         }
+        ["profiles"] => profiles_cmd(&[]),
+        ["profile", rest @ ..] => profiles_cmd(rest),
         ["validate"] => validate(Path::new("content")),
         ["validate", dir] => validate(Path::new(dir)),
         ["status"] => status(&Ctx::load()?, false),

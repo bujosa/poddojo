@@ -7,6 +7,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::check::CheckResult;
 use crate::content::{Catalog, Lesson};
 use crate::domains::DOMAINS;
 use crate::exam::ExamAttempt;
@@ -39,6 +40,11 @@ pub struct LessonProgress {
     pub last_seen: i64,
     /// Minutes spent with the lesson open (approximate).
     pub minutes: u32,
+    /// The lab session, so a lab can be resumed exactly where it was left: when it was prepared,
+    /// the last check results per step and how many hints were revealed per step.
+    pub prepared_at: Option<i64>,
+    pub results: BTreeMap<usize, Vec<CheckResult>>,
+    pub hints: BTreeMap<usize, usize>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -174,7 +180,46 @@ impl Progress {
         if let Some(e) = self.lessons.get_mut(&lesson.id) {
             e.steps.clear();
             e.completed_at = None;
+            e.prepared_at = None;
+            e.results.clear();
+            e.hints.clear();
         }
+    }
+
+    pub fn record_prepared(&mut self, lesson: &Lesson, now: i64) {
+        self.entry(&lesson.id).prepared_at = Some(now);
+        self.touch_day();
+    }
+
+    pub fn record_results(&mut self, lesson: &Lesson, step: usize, results: Vec<CheckResult>) {
+        self.entry(&lesson.id).results.insert(step, results);
+    }
+
+    pub fn record_hints(&mut self, lesson: &Lesson, step: usize, shown: usize) {
+        self.entry(&lesson.id).hints.insert(step, shown);
+    }
+
+    /// Labs started but not finished, most recent first.
+    pub fn labs_in_progress<'a>(&self, catalog: &'a Catalog) -> Vec<&'a Lesson> {
+        let mut labs: Vec<&Lesson> = catalog
+            .lessons
+            .values()
+            .filter(|l| l.has_lab() && !self.is_done(l))
+            .filter(|l| {
+                self.lessons
+                    .get(&l.id)
+                    .is_some_and(|p| p.prepared_at.is_some() || !p.steps.is_empty() || !p.results.is_empty())
+            })
+            .collect();
+        labs.sort_by_key(|l| std::cmp::Reverse(self.lessons.get(&l.id).map_or(0, |p| p.last_seen)));
+        labs
+    }
+
+    /// When this learner last did anything (lesson opened or exam finished).
+    pub fn last_active(&self) -> Option<i64> {
+        let lessons = self.lessons.values().map(|p| p.last_seen).max();
+        let exams = self.exams.iter().map(|a| a.finished_at).max();
+        lessons.max(exams).filter(|t| *t > 0)
     }
 
     fn refresh_completion(&mut self, lesson: &Lesson, now: i64) {
@@ -341,9 +386,13 @@ mod tests {
         assert!(p.is_done(&l));
         p.record_step(&l, 0, false, 5);
         assert!(p.is_done(&l), "a later failed re-check keeps an earned pass");
+        p.record_prepared(&l, 6);
+        p.record_hints(&l, 1, 2);
         assert_eq!(p.lesson("a").unwrap().completed_at, Some(4));
         p.reset_lab(&l);
         assert!(!p.is_done(&l));
+        let e = p.lesson("a").unwrap();
+        assert!(e.prepared_at.is_none() && e.hints.is_empty() && e.steps.is_empty());
     }
 
     #[test]

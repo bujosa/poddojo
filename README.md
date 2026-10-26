@@ -18,6 +18,10 @@
 </p>
 
 <p align="center">
+  <img src="docs/images/welcome.png" alt="The welcome screen: who is training today, with two profiles, their progress, a lab in progress to resume, a new profile form and guest mode" width="100%">
+</p>
+
+<p align="center">
   <img src="docs/images/home.png" alt="PodDojo home: continue card, CKAD readiness by domain, the chosen machine and the running lab cluster" width="100%">
 </p>
 
@@ -96,11 +100,14 @@ cargo xtask bundle --install
 
 Shortcuts: <kbd>⌘1</kbd>–<kbd>⌘7</kbd> pages, <kbd>⌘J</kbd> terminal, <kbd>⌘T</kbd> a real terminal window with the lab environment.
 
-1. **Pick a machine** in the top bar. To add a Linux server once:
+1. **Who's training?** Pick your profile (or create one) on the welcome screen, or try things in
+   **guest mode** without saving. Each profile keeps its own progress, quiz scores, exam history and
+   lab sessions: a lab you leave half-done resumes with its hints and last checks.
+2. **Pick a machine** in the top bar. To add a Linux server once:
    `docker context create my-server --docker host=ssh://user@192.168.1.20`
-2. Start with **Docker Foundations**, or jump to the CKAD track.
-3. For the CKAD track, create the **lab cluster** (Cluster page, about a minute).
-4. Work in the built-in console, or press **Open terminal** for a real shell that already points at
+3. Start with **Docker Foundations**, or jump to the CKAD track.
+4. For the CKAD track, create the **lab cluster** (Cluster page, about a minute).
+5. Work in the built-in console, or press **Open terminal** for a real shell that already points at
    your machine and lab cluster.
 
 ### Safety
@@ -118,6 +125,7 @@ Your machines and clusters are real, so PodDojo is careful:
 The same progress, from any terminal (or for an AI tutor such as Claude Code or Codex):
 
 ```bash
+dojo profiles          # who is studying (same profiles as the app)
 dojo status            # completion, CKAD readiness by domain, where to continue
 dojo next              # the lesson to continue with
 dojo prepare <lesson>  # set the lab up

@@ -202,6 +202,26 @@ pub fn parse_nodes(json: &str) -> Vec<Node> {
         .collect()
 }
 
+/// When PodDojo has no kubeconfig yet but this machine already runs a `poddojo` kind cluster
+/// (created by another data folder, the CLI, or a previous install), connect to it: export its
+/// kubeconfig into PodDojo's own file and remember the machine. Touches nothing else.
+pub fn adopt_existing(env: &LabEnv, paths: &Paths, target: &str) -> bool {
+    if paths.kubeconfig().exists() {
+        return false;
+    }
+    let cmd = format!(
+        "kind get clusters 2>/dev/null | grep -qx {CLUSTER_NAME} && kind export kubeconfig --name {CLUSTER_NAME} --kubeconfig {}",
+        shell_quote(&paths.kubeconfig().display().to_string())
+    );
+    if run(&cmd, env, Duration::from_secs(30)).success() {
+        let _ = ClusterRecord { target: target.to_string(), created_at: poddojo_core::now() }.save(paths);
+        true
+    } else {
+        let _ = std::fs::remove_file(paths.kubeconfig());
+        false
+    }
+}
+
 /// The machine to delete the lab cluster from: exactly the one it was created on. If that machine
 /// is no longer a Docker context, refuse rather than deleting some other machine's `poddojo`.
 pub fn delete_target<'a>(

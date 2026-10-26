@@ -23,6 +23,7 @@ impl App {
 
             self.continue_card(ui, &t);
             ui.add_space(12.0);
+            self.labs_card(ui, &t);
 
             ui.columns(2, |cols| {
                 self.readiness_card(&mut cols[0], &t);
@@ -127,7 +128,8 @@ impl App {
                             });
                             ui.add_space(14.0);
                             ui.horizontal(|ui| {
-                                if accent_button(ui, t, "Continue").clicked() {
+                                let lab_open = l.has_lab() && (p.prepared_at.is_some() || !p.steps.is_empty());
+                                if accent_button(ui, t, if lab_open { "Resume lab" } else { "Continue" }).clicked() {
                                     self.open_lesson(&l.id);
                                 }
                                 let next: Vec<(String, String)> = self
@@ -168,6 +170,52 @@ impl App {
                     });
                 });
             });
+    }
+
+    /// Labs started but not finished, so they can be resumed in one click.
+    fn labs_card(&mut self, ui: &mut egui::Ui, t: &Tokens) {
+        let labs: Vec<poddojo_core::Lesson> =
+            self.progress.labs_in_progress(&self.catalog).into_iter().take(4).cloned().collect();
+        if labs.is_empty() {
+            return;
+        }
+        theme::card(t).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Labs in progress").size(16.0).strong());
+                ui.label(
+                    RichText::new("pick up exactly where you stopped: prepared state, hints and last checks are kept")
+                        .size(12.5)
+                        .color(t.muted),
+                );
+            });
+            ui.add_space(6.0);
+            for l in &labs {
+                let p = self.progress.lesson(&l.id).cloned().unwrap_or_default();
+                let n = l.lab.as_ref().map_or(0, |x| x.steps.len());
+                let done = p.steps.len().min(n);
+                ui.horizontal(|ui| {
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(36.0, 36.0), egui::Sense::hover());
+                    ui.painter().rect_filled(rect, 9.0, t.amber.gamma_multiply(0.14));
+                    crate::icons::paint(ui.painter(), rect.shrink(9.0), crate::icons::Icon::Terminal, t.amber);
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(&l.title).size(14.5).strong().color(strong(t)));
+                        let when = p.prepared_at.map_or(String::new(), |ts| format!(" · prepared {}", ago(ts)));
+                        ui.label(RichText::new(format!("{done}/{n} steps{when}")).size(12.5).color(t.muted));
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if accent_button(ui, t, "Resume lab").clicked() {
+                            self.open_lesson(&l.id);
+                            self.learn.tab = crate::LessonTab::Lab;
+                        }
+                        let w = 140.0;
+                        theme::bar(ui, t, if n == 0 { 0.0 } else { done as f32 / n as f32 }, w, t.amber);
+                    });
+                });
+                ui.add_space(4.0);
+            }
+        });
+        ui.add_space(12.0);
     }
 
     fn readiness_card(&mut self, ui: &mut egui::Ui, t: &Tokens) {
