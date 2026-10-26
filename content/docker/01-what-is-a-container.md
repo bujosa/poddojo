@@ -45,7 +45,7 @@ answer = 1
 why = "In its own PID namespace the first process is PID 1. On the host the same process has an ordinary, larger PID. This also means PID 1 must handle signals properly, a theme you will meet again with Kubernetes."
 
 [[quiz]]
-q = "What happens to a container when its main process exits?"
+q = "A container started without `--rm` and without a restart policy: what happens when its main process exits?"
 choices = [
   "The container keeps running in the background",
   "Docker restarts it automatically",

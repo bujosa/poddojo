@@ -61,12 +61,13 @@ pub fn prepare(lesson: &Lesson, env: &LabEnv) -> (bool, String) {
     (ok, log)
 }
 
-/// Run the lab's cleanup commands (errors are reported, not fatal).
-pub fn reset(lesson: &Lesson, env: &LabEnv) -> String {
-    let Some(lab) = &lesson.lab else { return String::new() };
+/// Run the lab's cleanup commands (command errors are reported, not fatal). Returns `false` when
+/// cleanup was refused (the lab cluster is not PodDojo's), so callers keep the learner's progress.
+pub fn reset(lesson: &Lesson, env: &LabEnv) -> (bool, String) {
+    let Some(lab) = &lesson.lab else { return (true, String::new()) };
     // Cleanup deletes things: check the lab cluster is really PodDojo's before touching it.
     if let Err(e) = preflight(lesson.needs, env) {
-        return format!("✗ refusing to clean up: {e}\n");
+        return (false, format!("✗ refusing to clean up: {e}\n"));
     }
     let mut log = String::new();
     for cmd in &lab.cleanup {
@@ -78,7 +79,7 @@ pub fn reset(lesson: &Lesson, env: &LabEnv) -> String {
             log.push('\n');
         }
     }
-    log
+    (true, log)
 }
 
 pub fn write_files<'a>(dir: &Path, files: impl Iterator<Item = (&'a String, &'a String)>) -> std::io::Result<()> {

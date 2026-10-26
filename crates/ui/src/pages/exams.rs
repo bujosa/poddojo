@@ -175,20 +175,22 @@ impl App {
             theme::card(t).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.label(RichText::new(format!("{}. {}", i + 1, q.q)).strong());
-                for (j, c) in q.choices.iter().enumerate() {
+                for (pos, j) in q.order(lesson).into_iter().enumerate() {
+                    let Some(c) = q.choices.get(j) else { continue };
                     let picked = drill.answers.get(i).copied().flatten() == Some(j);
-                    let color = match (drill.submitted, j == q.answer, picked) {
-                        (true, true, _) => t.good,
-                        (true, false, true) => t.bad,
-                        _ => t.text,
+                    let state = match (drill.submitted, picked, j == q.answer) {
+                        (false, true, _) => theme::ChoiceState::Picked,
+                        (false, false, _) | (true, false, false) => theme::ChoiceState::Idle,
+                        (true, true, true) => theme::ChoiceState::Correct,
+                        (true, true, false) => theme::ChoiceState::Wrong,
+                        (true, false, true) => theme::ChoiceState::Missed,
                     };
-                    if ui
-                        .add_enabled(!drill.submitted, egui::RadioButton::new(picked, RichText::new(c).color(color)))
-                        .clicked()
+                    if theme::choice(ui, t, (b'A' + pos as u8) as char, c, state, !drill.submitted).clicked()
                         && let Some(a) = drill.answers.get_mut(i)
                     {
                         *a = Some(j);
                     }
+                    ui.add_space(4.0);
                 }
                 if drill.submitted {
                     ui.label(RichText::new(&q.why).small().color(t.muted));
@@ -262,6 +264,19 @@ impl App {
         let total_secs = e.minutes as i64 * 60;
         let left = total_secs - (now() - started_at);
         ctx.request_repaint_after(Duration::from_secs(1));
+        // Like the real exam, time is up at 0:00: grade what is there.
+        if left <= 0 && !self.exam.auto_graded && !self.jobs.busy("exam grade") {
+            self.exam.auto_graded = true;
+            self.toast("Time is up: grading your work now", false);
+            self.grade_exam(ctx, e, started_at);
+        }
+        // Remember the task on screen so a restart resumes there.
+        if let Some(a) = &mut self.progress.active_exam
+            && a.current_task != self.exam.task
+        {
+            a.current_task = self.exam.task;
+            self.save_progress();
+        }
         let flagged = self.progress.active_exam.as_ref().map(|a| a.flagged.clone()).unwrap_or_default();
         // Timer bar.
         theme::card(t).inner_margin(egui::Margin::symmetric(18, 12)).show(ui, |ui| {

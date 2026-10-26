@@ -466,7 +466,8 @@ impl App {
                 ui.label(RichText::new(&q.q).size(16.5).strong().color(strong(t)));
                 ui.add_space(8.0);
                 let picked_now = self.learn.answers.get(i).copied().flatten();
-                for (j, choice) in q.choices.iter().enumerate() {
+                for (pos, j) in q.order(&l.id).into_iter().enumerate() {
+                    let Some(choice) = q.choices.get(j) else { continue };
                     let state = match (submitted, picked_now == Some(j), j == q.answer) {
                         (false, true, _) => ChoiceState::Picked,
                         (false, false, _) => ChoiceState::Idle,
@@ -475,7 +476,7 @@ impl App {
                         (true, false, true) => ChoiceState::Missed,
                         (true, false, false) => ChoiceState::Idle,
                     };
-                    let letter = (b'A' + j as u8) as char;
+                    let letter = (b'A' + pos as u8) as char;
                     if theme::choice(ui, t, letter, choice, state, !submitted).clicked()
                         && let Some(a) = self.learn.answers.get_mut(i)
                     {
@@ -668,9 +669,9 @@ impl App {
                     && let Some(env) = env.clone()
                 {
                     let lesson = l.clone();
-                    self.jobs.spawn(&ctx, format!("lab {} reset", l.id), move |_| Done::Reset {
-                        lesson: lesson.id.clone(),
-                        log: lab::reset(&lesson, &env),
+                    self.jobs.spawn(&ctx, format!("lab {} reset", l.id), move |_| {
+                        let (ok, log) = lab::reset(&lesson, &env);
+                        Done::Reset { lesson: lesson.id.clone(), ok, log }
                     });
                 }
                 if busy {

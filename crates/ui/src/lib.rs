@@ -45,8 +45,8 @@ impl Page {
     const ALL: [(Page, Icon, &'static str); 7] = [
         (Page::Home, Icon::Home, "Home"),
         (Page::Learn, Icon::Book, "Learn"),
-        (Page::Docker, Icon::Container, "Docker"),
-        (Page::Cluster, Icon::Cluster, "Cluster"),
+        (Page::Docker, Icon::Container, "Docker explorer"),
+        (Page::Cluster, Icon::Cluster, "Lab cluster"),
         (Page::Exams, Icon::Stopwatch, "Exams"),
         (Page::Progress, Icon::Chart, "Progress"),
         (Page::Setup, Icon::Gear, "Setup"),
@@ -130,6 +130,8 @@ pub struct WelcomeState {
 #[derive(Default)]
 pub struct ExamState {
     pub task: usize,
+    /// Time ran out and grading was started automatically.
+    pub auto_graded: bool,
     pub result: Option<ExamAttempt>,
     pub reveal: BTreeSet<String>,
     pub confirm_finish: bool,
@@ -279,6 +281,8 @@ impl App {
         self.progress_stamp = progress_mtime(&self.paths);
         self.learn = LearnState::default();
         self.exam = ExamState::default();
+        self.exam.task = self.progress.active_exam.as_ref().map_or(0, |a| a.current_task);
+        self.jobs.owner = profile.id.clone();
         self.page = if self.progress.active_exam.is_some() { Page::Exams } else { Page::Home };
         if profile.is_guest() {
             self.toast("Guest mode: practise freely, nothing is kept for next time", true);
@@ -467,16 +471,20 @@ impl App {
                     ok,
                 );
             }
-            Done::Reset { lesson, log } => {
-                if let Some(l) = self.catalog.lesson(&lesson).cloned() {
+            Done::Reset { lesson, ok, log } => {
+                if ok && let Some(l) = self.catalog.lesson(&lesson).cloned() {
                     self.progress.reset_lab(&l);
                     self.save_progress();
                 }
                 if self.learn.lesson.as_deref() == Some(lesson.as_str()) {
-                    self.learn.results.clear();
+                    if ok {
+                        self.learn.results.clear();
+                        self.learn.hints.clear();
+                        self.learn.prepared = false;
+                    }
                     self.learn.lab_log = log;
                 }
-                self.toast("Lab reset", true);
+                self.toast(if ok { "Lab reset" } else { "Reset refused: your progress was kept (see the log)" }, ok);
             }
             Done::Checked { lesson, step, results } => {
                 let passed = results.iter().all(|r| r.passed);
@@ -571,6 +579,7 @@ impl App {
                         Some(poddojo_core::ActiveExam { exam_id: exam, started_at: now(), ..Default::default() });
                     self.exam.result = None;
                     self.exam.task = 0;
+                    self.exam.auto_graded = false;
                     self.save_progress();
                     self.toast("The clock is running. Good luck!", true);
                 } else {
@@ -890,7 +899,11 @@ impl App {
                 let sel = Page::ALL.iter().position(|p| p.0 == self.page);
                 let sliding = sel.and_then(|i| rects.get(i)).is_some();
                 if let Some(r) = sel.and_then(|i| rects.get(i)) {
-                    let y = ui.ctx().animate_value_with_time(egui::Id::new("nav-sel-y"), r.min.y, 0.22);
+                    let y = ui.ctx().animate_value_with_time(
+                        egui::Id::new("nav-sel-y"),
+                        r.min.y,
+                        theme::motion(ui.ctx(), 0.18),
+                    );
                     let hr = egui::Rect::from_min_size(egui::pos2(r.min.x, y), r.size());
                     ui.painter().rect_filled(hr, 9.0, t.accent_soft);
                     ui.painter().rect_filled(
@@ -982,7 +995,21 @@ impl App {
         }
         self.sync_progress();
         self.shortcuts(&ctx);
-        for done in self.jobs.poll() {
+        let me = self.profile.as_ref().map(|p| p.id.clone()).unwrap_or_default();
+        for (owner, done) in self.jobs.poll() {
+            // Lab and exam results belong to the profile that started them: if the learner switched
+            // profiles meanwhile, drop them instead of recording them for the wrong person.
+            let personal = matches!(
+                done,
+                Done::Checked { .. }
+                    | Done::Prepared { .. }
+                    | Done::Reset { .. }
+                    | Done::ExamStarted { .. }
+                    | Done::ExamGraded(_)
+            );
+            if personal && owner != me {
+                continue;
+            }
             self.handle(&ctx, done);
         }
         self.tick_study_time();
@@ -1054,12 +1081,13 @@ impl App {
     fn celebration(&mut self, ctx: &egui::Context) {
         let Some((at, headline, detail)) = self.celebrate.clone() else { return };
         let age = at.elapsed().as_secs_f32();
-        if age > 2.4 || !self.settings.motion {
+        // Short, and never during an exam: motion must not get in the way of work.
+        if age > 1.4 || !self.settings.motion || self.progress.active_exam.is_some() {
             self.celebrate = None;
             return;
         }
         let t = self.t;
-        let fade = (age / 0.2).min(1.0).min(((2.4 - age) / 0.5).clamp(0.0, 1.0));
+        let fade = (age / 0.15).min(1.0).min(((1.4 - age) / 0.35).clamp(0.0, 1.0));
         let screen = ctx.content_rect();
         let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("celebrate")));
         let c = screen.center();
@@ -1118,7 +1146,8 @@ fn nav_item(
 ) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 38.0), egui::Sense::click());
     let hovered = resp.hovered();
-    let hover = ui.ctx().animate_bool_with_time(resp.id.with("hover"), hovered && !selected, 0.12);
+    let hover =
+        ui.ctx().animate_bool_with_time(resp.id.with("hover"), hovered && !selected, theme::motion(ui.ctx(), 0.12));
     let p = ui.painter();
     if selected && paint_selection {
         p.rect_filled(rect, 9.0, t.accent_soft);

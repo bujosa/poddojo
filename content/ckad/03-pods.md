@@ -30,10 +30,10 @@ answer = 2
 why = "command replaces the image entrypoint. args supplies arguments. Shell syntax works only when a shell is explicitly invoked."
 
 [[quiz]]
-q = "A short task must remain stopped after a successful exit. Which policy fits?"
-choices = ["Always", "Never", "Restart", "Ready"]
+q = "A one-off Pod must never be restarted by the kubelet, whether it succeeds or fails. Which restartPolicy?"
+choices = ["Always", "Never", "OnFailure", "IfNotPresent"]
 answer = 1
-why = "Never leaves the terminated result for inspection. Always would restart it even after exit code zero; OnFailure is another valid choice when failures should retry."
+why = "Never leaves the container terminated after any exit, keeping the result for inspection. OnFailure would restart it after a non-zero exit, Always after any exit; IfNotPresent is an imagePullPolicy value, not a restartPolicy."
 
 [[quiz]]
 q = "Is CrashLoopBackOff a Pod phase?"

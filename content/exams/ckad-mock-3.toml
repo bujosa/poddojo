@@ -1,7 +1,7 @@
 # Original PodDojo practice tasks; not recalled or official exam questions.
 id = "ckad-mock-3"
 title = "CKAD Mock Exam 3 (hard)"
-summary = "Eighteen harder, multi-step tasks, closer to the toughest real-exam questions. Pass this one comfortably and you are ready to book the CKAD."
+summary = "Eighteen harder, multi-step tasks, closer to the toughest real-exam questions. Take it timed and fresh to find your remaining gaps: a mock score does not predict your certification result."
 minutes = 120
 pass_percent = 66
 setup = [

@@ -50,7 +50,7 @@ impl Tokens {
         border: Color32::from_rgb(214, 219, 233),
         text: Color32::from_rgb(17, 24, 39),
         muted: Color32::from_rgb(98, 108, 135),
-        accent: Color32::from_rgb(13, 148, 136),
+        accent: Color32::from_rgb(15, 118, 110),
         accent_soft: Color32::from_rgb(204, 251, 241),
         amber: Color32::from_rgb(217, 119, 6),
         good: Color32::from_rgb(5, 150, 105),
@@ -64,6 +64,11 @@ impl Tokens {
     pub fn get(dark: bool) -> Self {
         if dark { Self::DARK } else { Self::LIGHT }
     }
+}
+
+/// `secs` when animations are on, else 0 (Setup › Animations off = reduced motion).
+pub fn motion(ctx: &egui::Context, secs: f32) -> f32 {
+    if ctx.global_style().animation_time > 0.0 { secs } else { 0.0 }
 }
 
 pub fn apply(ctx: &egui::Context, t: &Tokens, zoom: f32, motion: bool) {
@@ -130,7 +135,7 @@ pub fn bar(ui: &mut egui::Ui, t: &Tokens, fraction: f32, width: f32, color: Colo
     let id = ui.next_auto_id();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 8.0), egui::Sense::hover());
     // Bars grow into place instead of popping.
-    let fraction = ui.ctx().animate_value_with_time(id.with("bar"), fraction.clamp(0.0, 1.0), 0.6);
+    let fraction = ui.ctx().animate_value_with_time(id.with("bar"), fraction.clamp(0.0, 1.0), motion(ui.ctx(), 0.35));
     let p = ui.painter();
     p.rect_filled(rect, CornerRadius::same(4), t.border);
     let mut fill = rect;
@@ -250,7 +255,7 @@ pub fn tab(ui: &mut egui::Ui, t: &Tokens, label: &str, selected: bool, done: boo
 pub fn ring(ui: &mut egui::Ui, t: &Tokens, fraction: f32, size: f32, label: &str, sub: &str, color: Color32) {
     let id = ui.next_auto_id();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
-    let fraction = ui.ctx().animate_value_with_time(id.with("ring"), fraction.clamp(0.0, 1.0), 0.9);
+    let fraction = ui.ctx().animate_value_with_time(id.with("ring"), fraction.clamp(0.0, 1.0), motion(ui.ctx(), 0.45));
     let c = rect.center();
     let r = size / 2.0 - 6.0;
     let p = ui.painter();

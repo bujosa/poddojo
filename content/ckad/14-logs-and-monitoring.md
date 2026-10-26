@@ -289,9 +289,9 @@ Labels describe arbitrary application groupings: `-l app=dojo-stream` selects th
 
 ## Metrics are optional sampled usage
 
-`kubectl top` needs a working Metrics API, usually provided by metrics-server. It is not installed in every cluster or in PodDojo by default. This lab setup downloads the official, pinned metrics-server v0.8.0 `components.yaml`, gives its supporting objects lesson-specific names, and patches `--kubelet-insecure-tls` for the local kind kubelet certificates. That flag disables kubelet certificate verification and is a lab accommodation, not production guidance.
+`kubectl top` needs a working Metrics API, usually provided by metrics-server. It is not installed in every cluster. This lab installs the official, pinned metrics-server v0.8.0 `components.yaml` into the lab cluster's `kube-system` namespace, unchanged except for `--kubelet-insecure-tls`, which kind needs because its kubelets use self-signed certificates. That flag disables kubelet certificate verification: a lab accommodation, never production guidance.
 
-The aggregation registration must have the canonical name `v1beta1.metrics.k8s.io`; APIService names encode their served version and group. Setup reuses an existing registration and labels an installation it creates so cleanup only removes its own registration. Supporting RBAC names use `dojo-`; a narrowly named authentication-reader binding lives in kube-system because that authentication ConfigMap belongs there. Workloads run in the lesson namespace.
+metrics-server is a cluster add-on, so it stays installed after the lab (later lessons and exams can use it) and setup leaves an existing installation alone. The Metrics API is registered as the APIService `v1beta1.metrics.k8s.io`; APIService names encode their version and group. Your workloads run in the lesson namespace.
 
 ```bash
 kubectl -n logs-monitoring-lab top pods -l app=dojo-stream

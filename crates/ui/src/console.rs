@@ -281,7 +281,7 @@ impl Console {
             (false, None) => ("killed".into(), ERR),
         };
         // A running command breathes.
-        let color = if e.running {
+        let color = if e.running && ui.ctx().global_style().animation_time > 0.0 {
             let pulse = 0.55 + 0.45 * ((ui.input(|i| i.time) * 4.0).sin() as f32 * 0.5 + 0.5);
             color.gamma_multiply(pulse)
         } else {
