@@ -128,7 +128,8 @@ Always name both endpoints when describing a connection: source namespace and de
 > 31 networks). Machines with many Compose projects run out. Either remove networks you no longer
 > need (`docker network ls`, then `docker network rm NAME`), pass an explicit `--subnet` as these
 > labs do, or give the daemon bigger pools with `default-address-pools` in `daemon.json`. Kubernetes
-> has no such limit for Pods: the CNI plugin allocates Pod IPs from the cluster's Pod CIDR.
+> does not create a Docker bridge per application: the CNI plugin gives Pods addresses from the
+> cluster's Pod ranges, which are finite too (configured CIDRs, CNI allocation and node limits).
 
 ## Prefer a user-defined bridge
 

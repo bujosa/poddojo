@@ -32,6 +32,7 @@ pub enum Done {
     },
     Reset {
         lesson: String,
+        ok: bool,
         log: String,
     },
     Checked {
@@ -71,6 +72,8 @@ pub enum Done {
 }
 
 pub struct Running {
+    /// The profile that started the job: results for someone else are dropped.
+    pub owner: String,
     pub label: String,
     pub started: Instant,
     pub live: Live,
@@ -81,12 +84,14 @@ pub struct Jobs {
     rx: Receiver<(u64, Done)>,
     next: u64,
     pub running: BTreeMap<u64, Running>,
+    /// The current profile; stamped on every job at spawn time.
+    pub owner: String,
 }
 
 impl Default for Jobs {
     fn default() -> Self {
         let (tx, rx) = channel();
-        Self { tx, rx, next: 1, running: BTreeMap::new() }
+        Self { tx, rx, next: 1, running: BTreeMap::new(), owner: String::new() }
     }
 }
 
@@ -101,7 +106,10 @@ impl Jobs {
         let id = self.next;
         self.next += 1;
         let live: Live = Arc::new(Mutex::new(String::new()));
-        self.running.insert(id, Running { label: label.into(), started: Instant::now(), live: live.clone() });
+        self.running.insert(
+            id,
+            Running { owner: self.owner.clone(), label: label.into(), started: Instant::now(), live: live.clone() },
+        );
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
@@ -112,11 +120,12 @@ impl Jobs {
         id
     }
 
-    pub fn poll(&mut self) -> Vec<Done> {
+    /// Finished jobs with the profile that started them.
+    pub fn poll(&mut self) -> Vec<(String, Done)> {
         let mut out = Vec::new();
         while let Ok((id, done)) = self.rx.try_recv() {
-            self.running.remove(&id);
-            out.push(done);
+            let owner = self.running.remove(&id).map(|r| r.owner).unwrap_or_default();
+            out.push((owner, done));
         }
         out
     }

@@ -390,14 +390,20 @@ fn quiz(c: &mut Ctx, id: &str) -> Result<(), String> {
     let mut correct = 0;
     for (i, q) in l.quiz.iter().enumerate() {
         println!("\nQ{}. {}", i + 1, q.q);
-        for (j, ch) in q.choices.iter().enumerate() {
-            println!("   {}) {}", (b'a' + j as u8) as char, ch);
+        let order = q.order(&l.id);
+        for (pos, j) in order.iter().enumerate() {
+            println!("   {}) {}", (b'a' + pos as u8) as char, q.choices.get(*j).map_or("", String::as_str));
         }
         print!("> ");
         let _ = std::io::stdout().flush();
         let mut line = String::new();
         stdin.lock().read_line(&mut line).map_err(|e| e.to_string())?;
-        let pick = line.trim().chars().next().map(|ch| (ch.to_ascii_lowercase() as u8).wrapping_sub(b'a') as usize);
+        let pick = line
+            .trim()
+            .chars()
+            .next()
+            .map(|ch| (ch.to_ascii_lowercase() as u8).wrapping_sub(b'a') as usize)
+            .and_then(|pos| order.get(pos).copied());
         if pick == Some(q.answer) {
             correct += 1;
             println!("✓ correct. {}", q.why);
@@ -472,7 +478,11 @@ fn check(c: &mut Ctx, id: &str, only: Option<usize>) -> Result<(), String> {
 fn reset(c: &mut Ctx, id: &str) -> Result<(), String> {
     let l = c.lesson(id)?.clone();
     let env = c.env_for(id)?;
-    print!("{}", lab::reset(&l, &env));
+    let (ok, log) = lab::reset(&l, &env);
+    print!("{log}");
+    if !ok {
+        return Err("lab reset refused; progress kept".into());
+    }
     c.progress.reset_lab(&l);
     c.save()?;
     println!("✓ lab reset");

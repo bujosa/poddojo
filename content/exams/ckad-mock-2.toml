@@ -234,8 +234,8 @@ timeout = 110
 
 [[tasks.checks]]
 name = '''Report remains readable after the Job exits'''
-run = '''kubectl -n mock2-q03 exec reports-reader -- cat /reports/history | grep -x report-ok'''
-equals = '''report-ok'''
+run = '''kubectl -n mock2-q03 exec reports-reader -- cat /reports/history | grep -cx report-ok'''
+matches = '''^[1-9][0-9]*$'''
 
 [[tasks]]
 id = '''q04'''
@@ -854,7 +854,7 @@ domain = '''networking'''
 weight = 7
 title = '''Repair a Service with no usable endpoints'''
 namespace = '''mock2-q14'''
-task = '''In `mock2-q14`, Deployment `search` runs `nginx:1.27-alpine` on container port 80 with Pod label app=search. Service `search` has both an incorrect selector and targetPort. Repair it to ClusterIP port 8080 targeting port 80 and selecting app=search. Create Pod `client`, image `busybox:1.36`, running `sleep 3600`, and verify it can fetch `http://search:8080/` using cluster DNS. Preserve the Deployment.'''
+task = '''In `mock2-q14`, Deployment `search` runs `nginx:1.27-alpine` on container port 80 with Pod label app=search. Service `search` has both an incorrect selector and targetPort. Repair it to ClusterIP port 8080 targeting port 80 and selecting app=search. Create Pod `client`, image `busybox:1.36`, running `sleep 14400` (it must outlive the exam), and verify it can fetch `http://search:8080/` using cluster DNS. Preserve the Deployment.'''
 setup = [
 '''
 kubectl -n mock2-q14 apply -f - <<'EOF'
@@ -885,7 +885,7 @@ EOF'''
 solution = '''
 ```bash
 kubectl -n mock2-q14 patch service search --type=merge -p '{"spec":{"selector":{"app":"search"},"ports":[{"port":8080,"targetPort":80,"protocol":"TCP"}]}}'
-kubectl -n mock2-q14 run client --image=busybox:1.36 --restart=Never --command -- sleep 3600
+kubectl -n mock2-q14 run client --image=busybox:1.36 --restart=Never --command -- sleep 14400
 kubectl -n mock2-q14 wait --for=condition=Ready pod/client --timeout=120s
 kubectl -n mock2-q14 rollout status deployment/search --timeout=120s
 ```'''

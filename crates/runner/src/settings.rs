@@ -23,6 +23,8 @@ pub struct Settings {
     /// UI scale.
     pub zoom: f32,
     pub dark: bool,
+    /// Animations (the living logo, transitions). Off = reduced motion.
+    pub motion: bool,
 }
 
 impl Default for Settings {
@@ -35,6 +37,7 @@ impl Default for Settings {
             nodeport: 30080,
             zoom: 1.0,
             dark: true,
+            motion: true,
         }
     }
 }

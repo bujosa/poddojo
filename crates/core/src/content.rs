@@ -70,6 +70,25 @@ pub struct QuizQuestion {
     pub why: String,
 }
 
+impl QuizQuestion {
+    /// The order to show the choices in: a fixed shuffle per question (salted with the lesson id),
+    /// so the correct answer is not always in the position it was authored in.
+    pub fn order(&self, salt: &str) -> Vec<usize> {
+        // FNV-1a of salt + question, then a tiny LCG for a Fisher-Yates shuffle.
+        let mut h: u64 = 0xcbf29ce484222325;
+        for b in salt.bytes().chain(self.q.bytes()) {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x100000001b3);
+        }
+        let mut order: Vec<usize> = (0..self.choices.len()).collect();
+        for i in (1..order.len()).rev() {
+            h = h.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            order.swap(i, (h >> 33) as usize % (i + 1));
+        }
+        order
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LabStep {
@@ -614,6 +633,32 @@ run = "true"
         let errors = Catalog::from_files(files).unwrap_err();
         assert!(errors.iter().any(|e| e.message.contains("out of range")));
         assert!(errors.iter().any(|e| e.message.contains("module `nope`")));
+    }
+
+    #[test]
+    fn quiz_order_is_a_stable_permutation_that_spreads_answers() {
+        let q = QuizQuestion {
+            q: "x".into(),
+            choices: vec!["a".into(), "b".into(), "c".into(), "d".into()],
+            answer: 1,
+            why: String::new(),
+        };
+        let o = q.order("lesson");
+        assert_eq!(o, q.order("lesson"));
+        let mut sorted = o.clone();
+        sorted.sort();
+        assert_eq!(sorted, vec![0, 1, 2, 3]);
+        let catalog = Catalog::embedded().unwrap();
+        let mut at = [0usize; 4];
+        for l in catalog.lessons.values() {
+            for q in &l.quiz {
+                if let Some(pos) = q.order(&l.id).iter().position(|&j| j == q.answer) {
+                    at[pos.min(3)] += 1;
+                }
+            }
+        }
+        let total: usize = at.iter().sum();
+        assert!(at.iter().all(|&n| n * 100 / total.max(1) < 40), "answers still bunched: {at:?}");
     }
 
     #[test]

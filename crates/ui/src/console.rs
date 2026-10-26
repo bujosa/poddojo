@@ -280,6 +280,13 @@ impl Console {
             (false, Some(code)) => (format!("exit {code}"), ERR),
             (false, None) => ("killed".into(), ERR),
         };
+        // A running command breathes.
+        let color = if e.running && ui.ctx().global_style().animation_time > 0.0 {
+            let pulse = 0.55 + 0.45 * ((ui.input(|i| i.time) * 4.0).sin() as f32 * 0.5 + 0.5);
+            color.gamma_multiply(pulse)
+        } else {
+            color
+        };
         let (m, f) = e.place.split_once(' ').unwrap_or((e.place.as_str(), ""));
         let mut job = egui::text::LayoutJob::default();
         job.wrap.max_width = f32::INFINITY;
