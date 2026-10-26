@@ -304,7 +304,7 @@ impl App {
             self.refresh_kube(ctx);
         }
         if let Some(cmd) = run {
-            self.run_in_console(ctx, &cmd);
+            self.run_in_terminal(&cmd);
         }
         let _ = accent_button;
     }

@@ -52,7 +52,7 @@ impl App {
             &t,
             "Docker",
             &format!(
-                "Everything on {}: run commands from the buttons and watch them in the console, so you learn the CLI as you click.",
+                "Everything on {}: run commands from the buttons and watch them in the terminal, so you learn the CLI as you click.",
                 self.target_name()
             ),
         );
@@ -83,8 +83,8 @@ impl App {
         match self.docker.tab {
             DockerTab::Containers => self.containers_tab(ui, &t, &ctx),
             DockerTab::Images => self.images_tab(ui, &t, &ctx),
-            DockerTab::Volumes => self.simple_tab(ui, &t, &ctx, "volume"),
-            DockerTab::Networks => self.simple_tab(ui, &t, &ctx, "network"),
+            DockerTab::Volumes => self.simple_tab(ui, &t, "volume"),
+            DockerTab::Networks => self.simple_tab(ui, &t, "network"),
         }
     }
 
@@ -189,7 +189,7 @@ impl App {
             }
         }
         if let Some(cmd) = run {
-            self.run_in_console(ctx, &cmd);
+            self.run_in_terminal(&cmd);
             self.docker.loaded_for = None;
         }
     }
@@ -274,12 +274,12 @@ impl App {
             self.load_layers(ctx, img);
         }
         if let Some(cmd) = run {
-            self.run_in_console(ctx, &cmd);
+            self.run_in_terminal(&cmd);
             self.docker.loaded_for = None;
         }
     }
 
-    fn simple_tab(&mut self, ui: &mut egui::Ui, t: &Tokens, ctx: &egui::Context, what: &str) {
+    fn simple_tab(&mut self, ui: &mut egui::Ui, t: &Tokens, what: &str) {
         let (rows, keys): (Vec<Row>, [&str; 2]) = if what == "volume" {
             (self.filtered(&self.docker.volumes, &["Name", "Driver"]), ["Name", "Driver"])
         } else {
@@ -310,7 +310,7 @@ impl App {
             });
         });
         if let Some(cmd) = run {
-            self.run_in_console(ctx, &cmd);
+            self.run_in_terminal(&cmd);
         }
     }
 }

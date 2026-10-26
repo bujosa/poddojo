@@ -25,6 +25,11 @@ chrono = { version = "0.4.45", default-features = false, features = ["std", "clo
 pulldown-cmark = { version = "0.13", default-features = false }
 log = "0.4"
 
+# terminal: a pseudo-terminal and a VT100 screen model (both small, pure Rust)
+pty-process = "0.5"
+rustix = { version = "1.1", default-features = false, features = ["std", "process"] }
+vt100 = "0.18"
+
 # ui
 egui = "0.36"
 eframe = { version = "0.36", default-features = false }

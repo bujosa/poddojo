@@ -25,6 +25,10 @@ pub struct Settings {
     pub dark: bool,
     /// Animations (the living logo, transitions). Off = reduced motion.
     pub motion: bool,
+    /// Width of the instructions pane in the lab workspace (0: automatic).
+    pub lab_split: f32,
+    /// Width of the task pane in the exam workspace (0: automatic).
+    pub exam_split: f32,
 }
 
 impl Default for Settings {
@@ -38,6 +42,8 @@ impl Default for Settings {
             zoom: 1.0,
             dark: true,
             motion: true,
+            lab_split: 0.0,
+            exam_split: 0.0,
         }
     }
 }
