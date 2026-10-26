@@ -8,37 +8,37 @@ objectives = ["Establish the target host, context and namespace for every task",
 
 [[quiz]]
 q = "A task gives a different target host or context. What is the first action?"
-choices = ["Reuse the previous task namespace", "Follow the task target instructions, then confirm namespace", "Delete resources with the same name everywhere", "Start applying manifests and fix the target later"]
+choices = ["Reuse the previous task namespace", "Follow the task target instructions, then confirm namespace", "Switch to the default namespace first", "Start applying manifests and fix the target later"]
 answer = 1
 why = "A correct object on the wrong target earns no useful result. Select the supplied host or context before setting the namespace and making changes."
 
 [[quiz]]
 q = "A low-weight task has consumed eight minutes without progress. What is the best next move?"
-choices = ["Keep going until solved", "Flag it, record the obstacle and take an easier task", "Restart the exam desktop", "Guess that it has passed"]
+choices = ["Keep going until solved", "Flag it, record the obstacle and take an easier task", "Delete your work and restart the task from scratch", "Ask the proctor for a hint"]
 answer = 1
 why = "Time has an opportunity cost. Preserve useful work, mark the task and collect accessible points before returning with the remaining budget."
 
 [[quiz]]
 q = "Which workflow best balances speed and correctness?"
-choices = ["Type every manifest from memory", "Generate a skeleton, add required fields, apply and verify", "Paste any blog example unchanged", "Only inspect resources without changing them"]
+choices = ["Type every manifest from memory", "Generate a skeleton, add required fields, apply and verify", "Copy a docs example and apply it unchanged", "Use only imperative commands, never YAML"]
 answer = 1
 why = "Imperative generators reduce typing, but inspection and verification catch wrong namespaces, missing fields and workloads that never become ready."
 
 [[quiz]]
 q = "Why reserve time at the end?"
-choices = ["The final tasks always have more weight", "To recheck flagged tasks, target namespaces and actual outcomes", "The timer pauses for verification", "Only the final object is graded"]
+choices = ["The final tasks always have more weight", "To recheck flagged tasks, target namespaces and actual outcomes", "To export your manifests for review", "To delete test resources, which cost points"]
 answer = 1
 why = "A quick final pass can catch incomplete rollouts, typoed names and tasks applied to the wrong namespace. The clock continues running, so reserve that time deliberately."
 
 [[quiz]]
 q = "Which terminal paste shortcut is normally used in the exam Linux remote desktop?"
-choices = ["Command+V in every application", "Ctrl+Shift+V in the terminal", "Ctrl+W", "The Insert key is required"]
+choices = ["Command+V in every application", "Ctrl+Shift+V in the terminal", "Ctrl+V in the terminal", "Right-click and Paste only"]
 answer = 1
 why = "The Linux terminal normally uses Ctrl+Shift+C and Ctrl+Shift+V; other desktop applications use Ctrl+C and Ctrl+V. Practice the provided desktop, since host clipboard behavior and key mappings can differ."
 
 [[quiz]]
 q = "What should you trust for exam rules shortly before the appointment?"
-choices = ["A remembered task count from last year", "The current official CKAD page, candidate handbook and allowed-resources rules", "An unofficial question dump", "The PodDojo pass result alone"]
+choices = ["A remembered task count from last year", "The current official CKAD page, candidate handbook and allowed-resources rules", "Recent forum posts from past candidates", "The PodDojo pass result alone"]
 answer = 1
 why = "Versions, delivery details, permitted resources and retake terms can change. Mock exams train execution but do not replace the current official policies or guarantee a real-exam result."
 +++

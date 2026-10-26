@@ -15,13 +15,13 @@ objectives = [
 
 [[quiz]]
 q = "Where does fsGroup belong?"
-choices = ["The container's resources", "The Pod's securityContext", "The imagePullSecrets list", "The container's envFrom"]
+choices = ["The container's securityContext", "The Pod's securityContext", "The emptyDir volume settings", "The PersistentVolumeClaim spec"]
 answer = 1
 why = "fsGroup is a Pod-level setting for supplemental group membership and supported volume access. It is not a container-level field and does not change ownership of files baked into the image."
 
 [[quiz]]
 q = "A Pod sets runAsUser: 1000, but one container sets runAsUser: 2000. Which UID does that container use?"
-choices = ["0", "1000", "2000", "A random UID on every exec"]
+choices = ["0", "1000", "2000", "The image's USER"]
 answer = 2
 why = "Where both levels support a setting, a container-level value overrides the Pod default for that container. Pod-level volume settings such as fsGroup still apply at their own scope."
 
@@ -33,13 +33,13 @@ why = "runAsNonRoot is a safety assertion. If the runtime would run as UID 0, or
 
 [[quiz]]
 q = "An application needs to write temporary files, but readOnlyRootFilesystem is true. What should you do?"
-choices = ["Make the container privileged", "Mount a writable emptyDir at the required temporary path", "Give it cluster-admin", "Disable seccomp"]
+choices = ["Make the container privileged", "Mount a writable emptyDir at the required temporary path", "Add the DAC_OVERRIDE capability", "Set runAsUser: 0"]
 answer = 1
 why = "The root filesystem can remain read-only while a separately mounted volume is writable. Provide only the paths the application needs, with ownership compatible with its runtime UID and groups."
 
 [[quiz]]
 q = "Which statement about the restricted Pod Security Standard is accurate for Linux Pods?"
-choices = ["It requires a read-only root filesystem in every case", "It permits privileged containers", "It requires dropping ALL capabilities and allows adding back only NET_BIND_SERVICE", "It replaces RBAC authorization"]
+choices = ["It requires a read-only root filesystem in every case", "It permits privileged containers", "It requires dropping ALL capabilities and allows adding back only NET_BIND_SERVICE", "It allows adding NET_ADMIN when runAsNonRoot is true"]
 answer = 2
 why = "Restricted limits privilege escalation, identity, seccomp, capabilities and other fields. A read-only root filesystem is valuable additional hardening but is not itself a universal Restricted requirement. Admission policy and RBAC answer different questions."
 

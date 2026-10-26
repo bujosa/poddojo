@@ -4,6 +4,7 @@ title = "CKAD Mock Exam 2"
 summary = "Seventeen new tasks on the same blueprint. Aim to finish with twenty minutes left to review your flagged tasks."
 minutes = 120
 pass_percent = 66
+requires = ["ingress-controller"]
 setup = [
 '''kubectl create namespace mock2-q01 --dry-run=client -o yaml | kubectl apply -f -''',
 '''kubectl create namespace mock2-q02 --dry-run=client -o yaml | kubectl apply -f -''',
@@ -21,6 +22,7 @@ setup = [
 '''kubectl create namespace mock2-q14 --dry-run=client -o yaml | kubectl apply -f -''',
 '''kubectl create namespace mock2-q15 --dry-run=client -o yaml | kubectl apply -f -''',
 '''kubectl create namespace mock2-q16 --dry-run=client -o yaml | kubectl apply -f -''',
+'''kubectl create namespace mock2-q16-ext --dry-run=client -o yaml | kubectl apply -f -''',
 '''kubectl create namespace mock2-q17 --dry-run=client -o yaml | kubectl apply -f -'''
 ]
 cleanup = [
@@ -40,6 +42,7 @@ cleanup = [
 '''kubectl delete namespace mock2-q14 --ignore-not-found --wait=true --timeout=120s || true''',
 '''kubectl delete namespace mock2-q15 --ignore-not-found --wait=true --timeout=120s || true''',
 '''kubectl delete namespace mock2-q16 --ignore-not-found --wait=true --timeout=120s || true''',
+'''kubectl delete namespace mock2-q16-ext --ignore-not-found --wait=true --timeout=120s || true''',
 '''kubectl delete namespace mock2-q17 --ignore-not-found --wait=true --timeout=120s || true''',
 '''kubectl delete crd dojo-notes.mock2.poddojo.local --ignore-not-found --wait=true --timeout=60s || true''',
 '''docker image rm dojo/mock2-receipt:v1 >/dev/null 2>&1 || true''',
@@ -60,8 +63,7 @@ cat > "$PODDOJO_LAB_DIR/receipt-image/Dockerfile" <<'EOF'
 FROM nginx:1.27-alpine
 COPY index.html /usr/share/nginx/html/index.html
 EOF
-printf 'receipt-v1
-' > "$PODDOJO_LAB_DIR/receipt-image/index.html"
+printf 'receipt-v1\n' > "$PODDOJO_LAB_DIR/receipt-image/index.html"
 docker build -t dojo/mock2-receipt:v1 "$PODDOJO_LAB_DIR/receipt-image"
 kind load docker-image dojo/mock2-receipt:v1 --name poddojo
 kubectl -n mock2-q01 apply -f - <<'EOF'
@@ -96,10 +98,44 @@ run = '''kubectl -n mock2-q01 get deployment/receipt -o jsonpath='{.spec.templat
 equals = '''IfNotPresent'''
 
 [[tasks.checks]]
-name = '''Application serves the required receipt'''
-run = '''kubectl -n mock2-q01 get deployment/receipt >/dev/null 2>&1 || exit 1; for i in $(seq 1 40); do v=$(kubectl -n mock2-q01 exec deployment/receipt -- wget -qO- http://127.0.0.1/ 2>/dev/null); [ "$v" = receipt-v1 ] && echo ok && exit 0; sleep 2; done; exit 1'''
+name = '''Dockerfile in receipt-image builds on nginx:1.27-alpine'''
+run = '''grep -Eiq '^FROM[[:space:]]+nginx:1\.27-alpine([[:space:]]|$)' "$PODDOJO_LAB_DIR/receipt-image/Dockerfile" && echo ok'''
+equals = '''ok'''
+
+[[tasks.checks]]
+name = '''Application serves exactly receipt-v1 and a newline'''
+run = '''kubectl -n mock2-q01 get deployment/receipt >/dev/null 2>&1 || exit 1; want=$(printf 'receipt-v1\n|'); for i in $(seq 1 40); do v=$(kubectl -n mock2-q01 exec deployment/receipt -- sh -c 'wget -qO- http://127.0.0.1/; echo "|"' 2>/dev/null); [ "$v" = "$want" ] && echo ok && exit 0; sleep 2; done; echo "got: $v"'''
 equals = '''ok'''
 timeout = 100
+
+[[tasks.negatives]]
+name = '''Stock nginx image with the page from a ConfigMap (no image built)'''
+run = '''
+kubectl -n mock2-q01 create configmap receipt-page --from-literal=index.html="$(printf 'receipt-v1\n')"
+kubectl -n mock2-q01 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: receipt}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: receipt}
+  template:
+    metadata:
+      labels: {app: receipt}
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.27-alpine
+        imagePullPolicy: IfNotPresent
+        volumeMounts: [{name: page, mountPath: /usr/share/nginx/html}]
+      volumes:
+      - name: page
+        configMap: {name: receipt-page}
+EOF
+kubectl -n mock2-q01 rollout status deployment/receipt --timeout=120s
+'''
+undo = '''kubectl -n mock2-q01 delete deployment/receipt configmap/receipt-page --ignore-not-found --wait=true'''
 
 [[tasks]]
 id = '''q02'''
@@ -133,9 +169,9 @@ kubectl -n mock2-q02 wait --for=condition=Ready pod/catalog --timeout=120s
 ```'''
 
 [[tasks.checks]]
-name = '''Seed init container succeeded'''
-run = '''kubectl -n mock2-q02 get pod/catalog -o jsonpath='{.status.initContainerStatuses[?(@.name=="seed")].state.terminated.exitCode}''''
-equals = '''0'''
+name = '''Regular init container seed ran to completion'''
+run = '''kubectl -n mock2-q02 get pod/catalog -o jsonpath='{.spec.initContainers[?(@.name=="seed")].restartPolicy}{"|"}{.status.initContainerStatuses[?(@.name=="seed")].state.terminated.exitCode}''''
+equals = '''|0'''
 
 [[tasks.checks]]
 name = '''Web volume is read-only'''
@@ -150,7 +186,108 @@ equals = '''catalog-ready'''
 [[tasks.checks]]
 name = '''Site is an emptyDir'''
 run = '''kubectl -n mock2-q02 get pod/catalog -o jsonpath='{.spec.volumes[?(@.name=="site")].emptyDir}''''
-equals = '''{}'''
+matches = '''^\{.*\}$'''
+
+[[tasks.negatives]]
+name = '''No init container: web writes the page itself before starting nginx'''
+run = '''
+kubectl -n mock2-q02 apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: catalog}
+spec:
+  volumes:
+  - name: site
+    emptyDir: {}
+  containers:
+  - name: web
+    image: nginx:1.27-alpine
+    command: [sh, -c, 'printf "catalog-ready\n" > /usr/share/nginx/html/index.html && exec nginx -g "daemon off;"']
+    ports: [{containerPort: 80}]
+    volumeMounts: [{name: site, mountPath: /usr/share/nginx/html}]
+EOF
+kubectl -n mock2-q02 wait --for=condition=Ready pod/catalog --timeout=120s
+'''
+undo = '''kubectl -n mock2-q02 delete pod catalog --ignore-not-found --grace-period=1 --wait=true'''
+
+[[tasks.negatives]]
+name = '''Serving directory mounted read-write'''
+run = '''
+kubectl -n mock2-q02 apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: catalog}
+spec:
+  volumes:
+  - name: site
+    emptyDir: {}
+  initContainers:
+  - name: seed
+    image: busybox:1.36
+    command: [sh, -c, 'printf "catalog-ready\n" > /seed/index.html']
+    volumeMounts: [{name: site, mountPath: /seed}]
+  containers:
+  - name: web
+    image: nginx:1.27-alpine
+    ports: [{containerPort: 80}]
+    volumeMounts: [{name: site, mountPath: /usr/share/nginx/html}]
+EOF
+kubectl -n mock2-q02 wait --for=condition=Ready pod/catalog --timeout=120s
+'''
+undo = '''kubectl -n mock2-q02 delete pod catalog --ignore-not-found --grace-period=1 --wait=true'''
+
+[[tasks.negatives]]
+name = '''seed declared as a native sidecar (restartPolicy Always) instead of a regular init container'''
+run = '''
+kubectl -n mock2-q02 apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: catalog}
+spec:
+  volumes:
+  - name: site
+    emptyDir: {}
+  initContainers:
+  - name: seed
+    image: busybox:1.36
+    restartPolicy: Always
+    command: [sh, -c, 'printf "catalog-ready\n" > /seed/index.html && sleep 3600']
+    volumeMounts: [{name: site, mountPath: /seed}]
+  containers:
+  - name: web
+    image: nginx:1.27-alpine
+    ports: [{containerPort: 80}]
+    volumeMounts: [{name: site, mountPath: /usr/share/nginx/html, readOnly: true}]
+EOF
+kubectl -n mock2-q02 wait --for=condition=Ready pod/catalog --timeout=120s
+'''
+undo = '''kubectl -n mock2-q02 delete pod catalog --ignore-not-found --grace-period=1 --wait=true'''
+
+[[tasks.alternatives]]
+name = '''Memory-backed emptyDir and a different init mount path'''
+run = '''
+kubectl -n mock2-q02 apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: catalog}
+spec:
+  volumes:
+  - name: site
+    emptyDir: {medium: Memory}
+  initContainers:
+  - name: seed
+    image: busybox:1.36
+    command: [sh, -c, 'echo catalog-ready > /work/index.html']
+    volumeMounts: [{name: site, mountPath: /work}]
+  containers:
+  - name: web
+    image: nginx:1.27-alpine
+    ports: [{containerPort: 80}]
+    volumeMounts: [{name: site, mountPath: /usr/share/nginx/html, readOnly: true}]
+EOF
+kubectl -n mock2-q02 wait --for=condition=Ready pod/catalog --timeout=120s
+'''
+undo = '''kubectl -n mock2-q02 delete pod catalog --ignore-not-found --grace-period=1 --wait=true'''
 
 [[tasks]]
 id = '''q03'''
@@ -227,15 +364,139 @@ run = '''kubectl -n mock2-q03 get cronjob/report -o jsonpath='{.spec.jobTemplate
 equals = '''reports'''
 
 [[tasks.checks]]
-name = '''job/report-now completes'''
-run = '''kubectl -n mock2-q03 wait --for=condition=complete job/report-now --timeout=90s >/dev/null && echo ok'''
+name = '''job/report-now was created from the CronJob and completes'''
+run = '''test "$(kubectl -n mock2-q03 get job/report-now -o jsonpath='{.metadata.ownerReferences[0].kind}/{.metadata.ownerReferences[0].name}')" = CronJob/report || exit 1; kubectl -n mock2-q03 wait --for=condition=complete job/report-now --timeout=90s >/dev/null && echo ok'''
 equals = '''ok'''
 timeout = 110
 
 [[tasks.checks]]
-name = '''Report remains readable after the Job exits'''
-run = '''kubectl -n mock2-q03 exec reports-reader -- cat /reports/history | grep -cx report-ok'''
+name = '''Report remains readable, read-only, after the Job exits'''
+run = '''test "$(kubectl -n mock2-q03 get pod/reports-reader -o jsonpath='{.spec.containers[0].volumeMounts[?(@.mountPath=="/reports")].readOnly}')" = true || exit 1; kubectl -n mock2-q03 exec reports-reader -- cat /reports/history | grep -cx report-ok'''
 matches = '''^[1-9][0-9]*$'''
+
+[[tasks.negatives]]
+name = '''Job report-now written by hand instead of created from the CronJob'''
+run = '''
+kubectl -n mock2-q03 apply -f - <<'EOF'
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: reports}
+spec:
+  storageClassName: standard
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: {storage: 64Mi}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: report}
+spec:
+  schedule: '*/15 * * * *'
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: report
+            image: busybox:1.36
+            command: [sh, -c, 'echo report-ok >> /reports/history']
+            volumeMounts: [{name: reports, mountPath: /reports}]
+          volumes:
+          - name: reports
+            persistentVolumeClaim: {claimName: reports}
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: report-now}
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: report
+        image: busybox:1.36
+        command: [sh, -c, 'echo report-ok >> /reports/history']
+        volumeMounts: [{name: reports, mountPath: /reports}]
+      volumes:
+      - name: reports
+        persistentVolumeClaim: {claimName: reports}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: reports-reader}
+spec:
+  terminationGracePeriodSeconds: 1
+  containers:
+  - name: reader
+    image: busybox:1.36
+    command: [sleep, '3600']
+    volumeMounts: [{name: reports, mountPath: /reports, readOnly: true}]
+  volumes:
+  - name: reports
+    persistentVolumeClaim: {claimName: reports}
+EOF
+kubectl -n mock2-q03 wait --for=condition=complete job/report-now --timeout=180s
+kubectl -n mock2-q03 wait --for=condition=Ready pod/reports-reader --timeout=180s
+'''
+undo = '''kubectl -n mock2-q03 delete pod/reports-reader job/report-now cronjob/report pvc/reports --ignore-not-found --wait=true --timeout=120s'''
+
+[[tasks.negatives]]
+name = '''Reader Pod mounts the claim read-write'''
+run = '''
+kubectl -n mock2-q03 apply -f - <<'EOF'
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: reports}
+spec:
+  storageClassName: standard
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: {storage: 64Mi}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: report}
+spec:
+  schedule: '*/15 * * * *'
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: report
+            image: busybox:1.36
+            command: [sh, -c, 'echo report-ok >> /reports/history']
+            volumeMounts: [{name: reports, mountPath: /reports}]
+          volumes:
+          - name: reports
+            persistentVolumeClaim: {claimName: reports}
+EOF
+kubectl -n mock2-q03 create job report-now --from=cronjob/report
+kubectl -n mock2-q03 wait --for=condition=complete job/report-now --timeout=180s
+kubectl -n mock2-q03 apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: reports-reader}
+spec:
+  terminationGracePeriodSeconds: 1
+  containers:
+  - name: reader
+    image: busybox:1.36
+    command: [sleep, '3600']
+    volumeMounts: [{name: reports, mountPath: /reports}]
+  volumes:
+  - name: reports
+    persistentVolumeClaim: {claimName: reports}
+EOF
+kubectl -n mock2-q03 wait --for=condition=Ready pod/reports-reader --timeout=180s
+'''
+undo = '''kubectl -n mock2-q03 delete pod/reports-reader job/report-now cronjob/report pvc/reports --ignore-not-found --wait=true --timeout=120s'''
 
 [[tasks]]
 id = '''q04'''
@@ -277,15 +538,71 @@ run = '''kubectl -n mock2-q04 get deployment/checkout -o jsonpath='{.spec.templa
 equals = '''nginx:1.27-alpine'''
 
 [[tasks.checks]]
-name = '''Zero-unavailable rollout is configured for the repaired image'''
-run = '''kubectl -n mock2-q04 get deployment/checkout -o jsonpath='{.spec.template.spec.containers[0].image}{"|"}{.spec.strategy.type}{"|"}{.spec.strategy.rollingUpdate.maxUnavailable}{"|"}{.spec.strategy.rollingUpdate.maxSurge}''''
-equals = '''nginx:1.27-alpine|RollingUpdate|0|1'''
+name = '''Zero-unavailable rollout is configured'''
+run = '''kubectl -n mock2-q04 get deployment/checkout -o jsonpath='{.spec.strategy.type}{"|"}{.spec.strategy.rollingUpdate.maxUnavailable}{"|"}{.spec.strategy.rollingUpdate.maxSurge}''''
+matches = '''^RollingUpdate\|0%?\|1$'''
 
 [[tasks.checks]]
-name = '''deployment/checkout becomes ready'''
-run = '''kubectl -n mock2-q04 get deployment/checkout >/dev/null 2>&1 || exit 1; for i in $(seq 1 45); do v=$(kubectl -n mock2-q04 get deployment/checkout -o jsonpath='{.status.readyReplicas}' 2>/dev/null); [ "$v" = "3" ] && echo ok && exit 0; sleep 2; done; exit 1'''
+name = '''Selector is preserved and 3 replicas become ready'''
+run = '''test "$(kubectl -n mock2-q04 get deployment/checkout -o jsonpath='{.spec.selector.matchLabels.app}|{.spec.replicas}' 2>/dev/null)" = 'checkout|3' || exit 1; for i in $(seq 1 45); do v=$(kubectl -n mock2-q04 get deployment/checkout -o jsonpath='{.status.readyReplicas}' 2>/dev/null); [ "$v" = "3" ] && echo ok && exit 0; sleep 2; done; exit 1'''
 equals = '''ok'''
 timeout = 110
+
+[[tasks.negatives]]
+name = '''Image fixed and scaled, but the default 25%/25% strategy is kept'''
+run = '''
+kubectl -n mock2-q04 set image deployment/checkout web=nginx:1.27-alpine
+kubectl -n mock2-q04 scale deployment checkout --replicas=3
+kubectl -n mock2-q04 rollout status deployment/checkout --timeout=180s
+'''
+undo = '''
+kubectl -n mock2-q04 delete deployment checkout --ignore-not-found --wait=true
+kubectl -n mock2-q04 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: checkout}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: checkout}
+  template:
+    metadata:
+      labels: {app: checkout}
+    spec:
+      containers:
+      - name: web
+        image: nginx:dojo-missing-mock2
+        ports: [{name: http, containerPort: 80}]
+EOF
+'''
+
+[[tasks.negatives]]
+name = '''Strategy configured but left at the old replica count'''
+run = '''
+kubectl -n mock2-q04 set image deployment/checkout web=nginx:1.27-alpine
+kubectl -n mock2-q04 patch deployment checkout --type=merge -p '{"spec":{"strategy":{"type":"RollingUpdate","rollingUpdate":{"maxUnavailable":0,"maxSurge":1}}}}'
+kubectl -n mock2-q04 rollout status deployment/checkout --timeout=180s
+'''
+undo = '''
+kubectl -n mock2-q04 delete deployment checkout --ignore-not-found --wait=true
+kubectl -n mock2-q04 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: checkout}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: checkout}
+  template:
+    metadata:
+      labels: {app: checkout}
+    spec:
+      containers:
+      - name: web
+        image: nginx:dojo-missing-mock2
+        ports: [{name: http, containerPort: 80}]
+EOF
+'''
 
 [[tasks]]
 id = '''q05'''
@@ -349,14 +666,111 @@ equals = '''ok'''
 timeout = 110
 
 [[tasks.checks]]
-name = '''Service selects the green revision'''
-run = '''kubectl -n mock2-q05 get service/store -o jsonpath='{.spec.selector.app}{"|"}{.spec.selector.color}''''
-equals = '''store|green'''
+name = '''Service store selects the green revision on port 80'''
+run = '''kubectl -n mock2-q05 get service/store -o jsonpath='{.spec.selector.app}{"|"}{.spec.selector.color}{"|"}{.spec.ports[0].port}{"|"}{.spec.ports[0].targetPort}''''
+matches = '''^store\|green\|80\|(80|http)$'''
 
 [[tasks.checks]]
-name = '''Green exists and blue remains available'''
-run = '''[ "$(kubectl -n mock2-q05 get deployment/store-green -o jsonpath='{.status.readyReplicas}')" = 2 ] && [ "$(kubectl -n mock2-q05 get deployment/store-blue -o jsonpath='{.status.readyReplicas}')" = 1 ] && echo ok'''
+name = '''Service traffic reaches only the two green Pods'''
+run = '''kubectl -n mock2-q05 get service/store >/dev/null 2>&1 || exit 1; for i in $(seq 1 20); do e=$(kubectl -n mock2-q05 get endpointslices -l kubernetes.io/service-name=store -o jsonpath='{range .items[*].endpoints[*]}{.targetRef.name}{"\n"}{end}' 2>/dev/null); n=$(printf '%s\n' "$e" | grep -c .); g=$(printf '%s\n' "$e" | grep -c '^store-green-'); [ "$n" = 2 ] && [ "$g" = 2 ] && echo ok && exit 0; sleep 2; done; echo "$n endpoints, $g green"'''
 equals = '''ok'''
+timeout = 60
+
+[[tasks.checks]]
+name = '''Blue remains available at one replica for rollback'''
+run = '''[ "$(kubectl -n mock2-q05 get deployment/store-green -o jsonpath='{.status.readyReplicas}')" = 2 ] && [ "$(kubectl -n mock2-q05 get deployment/store-blue -o jsonpath='{.spec.replicas}|{.status.readyReplicas}')" = '1|1' ] && echo ok'''
+equals = '''ok'''
+
+[[tasks.negatives]]
+name = '''Service selector narrowed to app=store only (blue and green both receive traffic)'''
+run = '''
+kubectl -n mock2-q05 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: store-blue}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: store, color: blue}
+  template:
+    metadata:
+      labels: {app: store, color: blue}
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.27-alpine
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: store-green}
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: store, color: green}
+  template:
+    metadata:
+      labels: {app: store, color: green}
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.27-alpine
+---
+apiVersion: v1
+kind: Service
+metadata: {name: store}
+spec:
+  selector: {app: store}
+  ports: [{port: 80, targetPort: 80}]
+EOF
+kubectl -n mock2-q05 rollout status deployment/store-blue --timeout=120s
+kubectl -n mock2-q05 rollout status deployment/store-green --timeout=120s
+'''
+undo = '''kubectl -n mock2-q05 delete deployment/store-blue deployment/store-green service/store --ignore-not-found --wait=true'''
+
+[[tasks.negatives]]
+name = '''Blue scaled to zero after the switch'''
+run = '''
+kubectl -n mock2-q05 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: store-blue}
+spec:
+  replicas: 0
+  selector:
+    matchLabels: {app: store, color: blue}
+  template:
+    metadata:
+      labels: {app: store, color: blue}
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.27-alpine
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: store-green}
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: store, color: green}
+  template:
+    metadata:
+      labels: {app: store, color: green}
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.27-alpine
+---
+apiVersion: v1
+kind: Service
+metadata: {name: store}
+spec:
+  selector: {app: store, color: green}
+  ports: [{port: 80, targetPort: 80}]
+EOF
+kubectl -n mock2-q05 rollout status deployment/store-green --timeout=120s
+'''
+undo = '''kubectl -n mock2-q05 delete deployment/store-blue deployment/store-green service/store --ignore-not-found --wait=true'''
 
 [[tasks]]
 id = '''q06'''
@@ -391,6 +805,34 @@ timeout = 110
 name = '''Helm creates a ClusterIP service on port 80'''
 run = '''kubectl -n mock2-q06 get service/ledger-web -o jsonpath='{.spec.type}{"|"}{.spec.ports[0].port}''''
 equals = '''ClusterIP|80'''
+
+[[tasks.checks]]
+name = '''Release is deployed without a ServiceAccount or autoscaler'''
+run = '''test "$(helm -n mock2-q06 list --deployed -q 2>/dev/null)" = ledger || exit 1; kubectl -n mock2-q06 get serviceaccount ledger-web >/dev/null 2>&1 && { echo 'ServiceAccount ledger-web exists'; exit 0; }; test -z "$(kubectl -n mock2-q06 get hpa -o name)" && echo ok'''
+equals = '''ok'''
+
+[[tasks.negatives]]
+name = '''Chart rendered with helm template and applied with kubectl (no release)'''
+run = '''
+helm create "$PODDOJO_LAB_DIR/dojo-m2-chart"
+helm template ledger "$PODDOJO_LAB_DIR/dojo-m2-chart" -n mock2-q06 --set fullnameOverride=ledger-web --set image.repository=nginx --set-string image.tag=1.27-alpine --set replicaCount=2 --set serviceAccount.create=false --set autoscaling.enabled=false --skip-tests | kubectl -n mock2-q06 apply -f -
+kubectl -n mock2-q06 rollout status deployment/ledger-web --timeout=120s
+'''
+undo = '''
+kubectl -n mock2-q06 delete deployment/ledger-web service/ledger-web --ignore-not-found --wait=true
+rm -rf -- "$PODDOJO_LAB_DIR/dojo-m2-chart"
+'''
+
+[[tasks.negatives]]
+name = '''Release installed with the chart's default ServiceAccount creation'''
+run = '''
+helm create "$PODDOJO_LAB_DIR/dojo-m2-chart"
+helm upgrade --install ledger "$PODDOJO_LAB_DIR/dojo-m2-chart" -n mock2-q06 --set fullnameOverride=ledger-web --set image.repository=nginx --set-string image.tag=1.27-alpine --set replicaCount=2 --set autoscaling.enabled=false --wait --timeout=180s
+'''
+undo = '''
+helm uninstall ledger -n mock2-q06 --wait --timeout=120s
+rm -rf -- "$PODDOJO_LAB_DIR/dojo-m2-chart"
+'''
 
 [[tasks]]
 id = '''q07'''
@@ -454,14 +896,93 @@ equals = '''ok'''
 timeout = 110
 
 [[tasks.checks]]
-name = '''Rendered overlay is a valid exam-api manifest'''
-run = '''test -s "$PODDOJO_LAB_DIR/m2-rendered.yaml" && kubectl create --dry-run=client -f "$PODDOJO_LAB_DIR/m2-rendered.yaml" -o jsonpath='{.metadata.name}|{.metadata.namespace}|{.spec.replicas}''''
-equals = '''exam-api|mock2-q07|2'''
+name = '''Rendered overlay is the exam-api manifest'''
+run = '''test -s "$PODDOJO_LAB_DIR/m2-rendered.yaml" && kubectl create --dry-run=client -f "$PODDOJO_LAB_DIR/m2-rendered.yaml" -o jsonpath='{.metadata.name}|{.metadata.namespace}|{.spec.replicas}|{.spec.template.spec.containers[0].image}''''
+equals = '''exam-api|mock2-q07|2|nginx:1.27-alpine'''
 
 [[tasks.checks]]
-name = '''Reusable base retains its original image'''
-run = '''kubectl kustomize "$PODDOJO_LAB_DIR/m2-kustomize/base" | kubectl create --dry-run=client -f - -o jsonpath='{.spec.template.spec.containers[0].image}''''
-equals = '''nginx:1.26-alpine'''
+name = '''Reusable base keeps its original image and replicas'''
+run = '''kubectl kustomize "$PODDOJO_LAB_DIR/m2-kustomize/base" | kubectl create --dry-run=client -f - -o jsonpath='{.metadata.name}|{.spec.replicas}|{.spec.template.spec.containers[0].image}''''
+equals = '''api|1|nginx:1.26-alpine'''
+
+[[tasks.negatives]]
+name = '''Base edited to the new image and replicas; overlay only adds prefix and namespace'''
+run = '''
+mkdir -p "$PODDOJO_LAB_DIR/m2-kustomize/base" "$PODDOJO_LAB_DIR/m2-kustomize/overlays/exam"
+cat > "$PODDOJO_LAB_DIR/m2-kustomize/base/deploy.yaml" <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: api}
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: api}
+  template:
+    metadata:
+      labels: {app: api}
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.27-alpine
+EOF
+printf 'resources: [deploy.yaml]\n' > "$PODDOJO_LAB_DIR/m2-kustomize/base/kustomization.yaml"
+printf 'resources: [../../base]\nnamespace: mock2-q07\nnamePrefix: exam-\n' > "$PODDOJO_LAB_DIR/m2-kustomize/overlays/exam/kustomization.yaml"
+kubectl kustomize "$PODDOJO_LAB_DIR/m2-kustomize/overlays/exam" > "$PODDOJO_LAB_DIR/m2-rendered.yaml"
+kubectl apply -k "$PODDOJO_LAB_DIR/m2-kustomize/overlays/exam"
+kubectl -n mock2-q07 rollout status deployment/exam-api --timeout=120s
+'''
+undo = '''
+kubectl -n mock2-q07 delete deployment exam-api --ignore-not-found --wait=true
+rm -rf -- "$PODDOJO_LAB_DIR/m2-kustomize" "$PODDOJO_LAB_DIR/m2-rendered.yaml"
+'''
+
+[[tasks.alternatives]]
+name = '''Overlay uses a strategic-merge patch instead of images/replicas'''
+run = '''
+mkdir -p "$PODDOJO_LAB_DIR/m2-kustomize/base" "$PODDOJO_LAB_DIR/m2-kustomize/overlays/exam"
+cat > "$PODDOJO_LAB_DIR/m2-kustomize/base/deploy.yaml" <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: api}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: api}
+  template:
+    metadata:
+      labels: {app: api}
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.26-alpine
+EOF
+printf 'resources:\n- deploy.yaml\n' > "$PODDOJO_LAB_DIR/m2-kustomize/base/kustomization.yaml"
+cat > "$PODDOJO_LAB_DIR/m2-kustomize/overlays/exam/kustomization.yaml" <<'EOF'
+resources:
+- ../../base
+namespace: mock2-q07
+namePrefix: exam-
+patches:
+- patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: api}
+    spec:
+      replicas: 2
+      template:
+        spec:
+          containers:
+          - name: web
+            image: nginx:1.27-alpine
+EOF
+kubectl kustomize "$PODDOJO_LAB_DIR/m2-kustomize/overlays/exam" > "$PODDOJO_LAB_DIR/m2-rendered.yaml"
+kubectl apply -f "$PODDOJO_LAB_DIR/m2-rendered.yaml"
+kubectl -n mock2-q07 rollout status deployment/exam-api --timeout=120s
+'''
+undo = '''
+kubectl -n mock2-q07 delete deployment exam-api --ignore-not-found --wait=true
+rm -rf -- "$PODDOJO_LAB_DIR/m2-kustomize" "$PODDOJO_LAB_DIR/m2-rendered.yaml"
+'''
 
 [[tasks]]
 id = '''q08'''
@@ -502,23 +1023,113 @@ kubectl -n mock2-q08 rollout status deployment/health --timeout=180s
 [[tasks.checks]]
 name = '''Readiness probe is repaired'''
 run = '''kubectl -n mock2-q08 get deployment/health -o jsonpath='{.spec.template.spec.containers[0].readinessProbe.httpGet.path}{"|"}{.spec.template.spec.containers[0].readinessProbe.httpGet.port}{"|"}{.spec.template.spec.containers[0].readinessProbe.periodSeconds}{"|"}{.spec.template.spec.containers[0].readinessProbe.failureThreshold}''''
-equals = '''/|80|5|3'''
+matches = '''^/\|(80|http)\|5\|3$'''
 
 [[tasks.checks]]
 name = '''Liveness probe checks HTTP'''
 run = '''kubectl -n mock2-q08 get deployment/health -o jsonpath='{.spec.template.spec.containers[0].livenessProbe.httpGet.path}{"|"}{.spec.template.spec.containers[0].livenessProbe.httpGet.port}{"|"}{.spec.template.spec.containers[0].livenessProbe.periodSeconds}{"|"}{.spec.template.spec.containers[0].livenessProbe.failureThreshold}''''
-equals = '''/|80|5|3'''
+matches = '''^/\|(80|http)\|5\|3$'''
 
 [[tasks.checks]]
 name = '''Startup budget is 60 seconds'''
 run = '''kubectl -n mock2-q08 get deployment/health -o jsonpath='{.spec.template.spec.containers[0].startupProbe.httpGet.path}{"|"}{.spec.template.spec.containers[0].startupProbe.httpGet.port}{"|"}{.spec.template.spec.containers[0].startupProbe.periodSeconds}{"|"}{.spec.template.spec.containers[0].startupProbe.failureThreshold}''''
-equals = '''/|80|2|30'''
+matches = '''^/\|(80|http)\|2\|30$'''
 
 [[tasks.checks]]
-name = '''deployment/health becomes ready'''
-run = '''kubectl -n mock2-q08 get deployment/health >/dev/null 2>&1 || exit 1; for i in $(seq 1 45); do v=$(kubectl -n mock2-q08 get deployment/health -o jsonpath='{.status.readyReplicas}' 2>/dev/null); [ "$v" = "2" ] && echo ok && exit 0; sleep 2; done; exit 1'''
+name = '''deployment/health becomes ready with the original image'''
+run = '''test "$(kubectl -n mock2-q08 get deployment/health -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null)" = nginx:1.27-alpine || exit 1; for i in $(seq 1 45); do v=$(kubectl -n mock2-q08 get deployment/health -o jsonpath='{.status.readyReplicas}' 2>/dev/null); [ "$v" = "2" ] && echo ok && exit 0; sleep 2; done; exit 1'''
 equals = '''ok'''
 timeout = 110
+
+[[tasks.negatives]]
+name = '''Only the readiness probe is repaired (no liveness or startup probe)'''
+run = '''
+kubectl -n mock2-q08 patch deployment health --type=strategic -p '{"spec":{"replicas":2,"template":{"spec":{"containers":[{"name":"web","readinessProbe":{"httpGet":{"path":"/","port":80},"periodSeconds":5,"failureThreshold":3}}]}}}}'
+kubectl -n mock2-q08 rollout status deployment/health --timeout=180s
+'''
+undo = '''
+kubectl -n mock2-q08 delete deployment health --ignore-not-found --wait=true
+kubectl -n mock2-q08 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: health}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: health}
+  template:
+    metadata:
+      labels: {app: health}
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.27-alpine
+        ports: [{name: http, containerPort: 80}]
+        readinessProbe:
+          httpGet: {path: /missing, port: 80}
+          periodSeconds: 2
+EOF
+'''
+
+[[tasks.negatives]]
+name = '''Startup probe uses the default 3 failures (6 second budget)'''
+run = '''
+kubectl -n mock2-q08 patch deployment health --type=strategic -p '{"spec":{"replicas":2,"template":{"spec":{"containers":[{"name":"web","readinessProbe":{"httpGet":{"path":"/","port":80},"periodSeconds":5,"failureThreshold":3},"livenessProbe":{"httpGet":{"path":"/","port":80},"periodSeconds":5,"failureThreshold":3},"startupProbe":{"httpGet":{"path":"/","port":80},"periodSeconds":2}}]}}}}'
+kubectl -n mock2-q08 rollout status deployment/health --timeout=180s
+'''
+undo = '''
+kubectl -n mock2-q08 delete deployment health --ignore-not-found --wait=true
+kubectl -n mock2-q08 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: health}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: health}
+  template:
+    metadata:
+      labels: {app: health}
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.27-alpine
+        ports: [{name: http, containerPort: 80}]
+        readinessProbe:
+          httpGet: {path: /missing, port: 80}
+          periodSeconds: 2
+EOF
+'''
+
+[[tasks.alternatives]]
+name = '''Probes target the named container port http'''
+run = '''
+kubectl -n mock2-q08 patch deployment health --type=strategic -p '{"spec":{"replicas":2,"template":{"spec":{"containers":[{"name":"web","readinessProbe":{"httpGet":{"path":"/","port":"http"},"periodSeconds":5,"failureThreshold":3},"livenessProbe":{"httpGet":{"path":"/","port":"http"},"periodSeconds":5,"failureThreshold":3},"startupProbe":{"httpGet":{"path":"/","port":"http"},"periodSeconds":2,"failureThreshold":30}}]}}}}'
+kubectl -n mock2-q08 rollout status deployment/health --timeout=180s
+'''
+undo = '''
+kubectl -n mock2-q08 delete deployment health --ignore-not-found --wait=true
+kubectl -n mock2-q08 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: health}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: health}
+  template:
+    metadata:
+      labels: {app: health}
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.27-alpine
+        ports: [{name: http, containerPort: 80}]
+        readinessProbe:
+          httpGet: {path: /missing, port: 80}
+          periodSeconds: 2
+EOF
+'''
 
 [[tasks]]
 id = '''q09'''
@@ -577,20 +1188,81 @@ run = '''cat "$PODDOJO_LAB_DIR/m2-audit.log"'''
 equals = '''FATAL audit source unavailable'''
 
 [[tasks.checks]]
-name = '''Exit status is recorded'''
-run = '''cat "$PODDOJO_LAB_DIR/m2-exit.txt"'''
+name = '''Exit status is recorded and the failed Pod is preserved'''
+run = '''test "$(kubectl -n mock2-q09 get pod/audit-broken -o jsonpath='{.status.phase}' 2>/dev/null)" = Failed || { echo 'audit-broken is gone'; exit 0; }; cat "$PODDOJO_LAB_DIR/m2-exit.txt"'''
 equals = '''42'''
 
 [[tasks.checks]]
 name = '''Saved manifest uses the supported API'''
-run = '''kubectl create --dry-run=client -f "$PODDOJO_LAB_DIR/m2-legacy.yaml" -o jsonpath='{.apiVersion}''''
-equals = '''apps/v1'''
+run = '''kubectl create --dry-run=client -f "$PODDOJO_LAB_DIR/m2-legacy.yaml" -o jsonpath='{.apiVersion}|{.metadata.name}|{.spec.selector.matchLabels.app}''''
+equals = '''apps/v1|audit|audit'''
 
 [[tasks.checks]]
-name = '''deployment/audit becomes ready'''
-run = '''kubectl -n mock2-q09 get deployment/audit >/dev/null 2>&1 || exit 1; for i in $(seq 1 45); do v=$(kubectl -n mock2-q09 get deployment/audit -o jsonpath='{.status.readyReplicas}' 2>/dev/null); [ "$v" = "1" ] && echo ok && exit 0; sleep 2; done; exit 1'''
-equals = '''ok'''
+name = '''deployment/audit runs the original workload'''
+run = '''kubectl -n mock2-q09 get deployment/audit >/dev/null 2>&1 || exit 1; for i in $(seq 1 45); do v=$(kubectl -n mock2-q09 get deployment/audit -o jsonpath='{.status.readyReplicas}' 2>/dev/null); [ "$v" = "1" ] && break; sleep 2; done; [ "$v" = 1 ] || exit 1; kubectl -n mock2-q09 logs deployment/audit'''
+equals = '''repaired'''
 timeout = 110
+
+[[tasks.negatives]]
+name = '''Evidence captured, then the failed Pod deleted'''
+run = '''
+kubectl -n mock2-q09 wait --for=jsonpath='{.status.phase}'=Failed pod/audit-broken --timeout=120s
+kubectl -n mock2-q09 logs audit-broken > "$PODDOJO_LAB_DIR/m2-audit.log"
+printf '42\n' > "$PODDOJO_LAB_DIR/m2-exit.txt"
+sed -i.bak 's@apiVersion: extensions/v1beta1@apiVersion: apps/v1@' "$PODDOJO_LAB_DIR/m2-legacy.yaml"
+rm -f "$PODDOJO_LAB_DIR/m2-legacy.yaml.bak"
+kubectl -n mock2-q09 apply -f "$PODDOJO_LAB_DIR/m2-legacy.yaml"
+kubectl -n mock2-q09 rollout status deployment/audit --timeout=120s
+kubectl -n mock2-q09 delete pod audit-broken --wait=true
+'''
+undo = '''
+kubectl -n mock2-q09 delete deployment audit --ignore-not-found --wait=true
+rm -f -- "$PODDOJO_LAB_DIR/m2-audit.log" "$PODDOJO_LAB_DIR/m2-exit.txt" "$PODDOJO_LAB_DIR/m2-current.yaml"
+kubectl -n mock2-q09 apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: audit-broken}
+spec:
+  restartPolicy: Never
+  containers:
+  - name: audit
+    image: busybox:1.36
+    command: [sh, -c, 'echo FATAL audit source unavailable; exit 42']
+EOF
+kubectl -n mock2-q09 wait --for=jsonpath='{.status.phase}'=Failed pod/audit-broken --timeout=120s
+cat > "$PODDOJO_LAB_DIR/m2-legacy.yaml" <<'EOF'
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata: {name: audit}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: audit}
+  template:
+    metadata:
+      labels: {app: audit}
+    spec:
+      containers:
+      - name: web
+        image: busybox:1.36
+        ports: [{name: http, containerPort: 80}]
+        command: [sh, -c, "echo repaired; sleep 3600"]
+EOF
+'''
+
+[[tasks.negatives]]
+name = '''Deployment created imperatively; the legacy manifest is left obsolete'''
+run = '''
+kubectl -n mock2-q09 wait --for=jsonpath='{.status.phase}'=Failed pod/audit-broken --timeout=120s
+kubectl -n mock2-q09 logs audit-broken > "$PODDOJO_LAB_DIR/m2-audit.log"
+printf '42\n' > "$PODDOJO_LAB_DIR/m2-exit.txt"
+kubectl -n mock2-q09 create deployment audit --image=busybox:1.36 -- sh -c 'echo repaired; sleep 3600'
+kubectl -n mock2-q09 rollout status deployment/audit --timeout=120s
+'''
+undo = '''
+kubectl -n mock2-q09 delete deployment audit --ignore-not-found --wait=true
+rm -f -- "$PODDOJO_LAB_DIR/m2-audit.log" "$PODDOJO_LAB_DIR/m2-exit.txt"
+'''
 
 [[tasks]]
 id = '''q10'''
@@ -634,14 +1306,76 @@ run = '''kubectl -n mock2-q10 get pod/consumer -o jsonpath='{.spec.containers[0]
 equals = '''settings|MODE'''
 
 [[tasks.checks]]
-name = '''Password is sourced from the Secret'''
-run = '''kubectl -n mock2-q10 get pod/consumer -o jsonpath='{.spec.containers[0].env[?(@.name=="PASSWORD")].valueFrom.secretKeyRef.name}{"|"}{.spec.containers[0].env[?(@.name=="PASSWORD")].valueFrom.secretKeyRef.key}''''
-equals = '''credentials|password'''
+name = '''Password is sourced from the Opaque Secret credentials'''
+run = '''kubectl -n mock2-q10 get pod/consumer -o jsonpath='{.spec.containers[0].env[?(@.name=="PASSWORD")].valueFrom.secretKeyRef.name}' 2>/dev/null | grep -qx credentials || exit 1; kubectl -n mock2-q10 get secret/credentials -o jsonpath='{.type}''''
+equals = '''Opaque'''
 
 [[tasks.checks]]
 name = '''Configuration and secret reach the running application'''
 run = '''kubectl -n mock2-q10 exec consumer -- sh -c 'test "$MODE" = exam && test "$PASSWORD" = dojo-demo-42 && test "$(cat /etc/dojo/app.conf)" = workers=3 && echo ok''''
 equals = '''ok'''
+
+[[tasks.negatives]]
+name = '''Values hard-coded in the Pod environment'''
+run = '''
+printf 'workers=3\n' > "$PODDOJO_LAB_DIR/m2-app.conf"
+kubectl -n mock2-q10 create configmap settings --from-literal=MODE=exam --from-file=app.conf="$PODDOJO_LAB_DIR/m2-app.conf"
+kubectl -n mock2-q10 create secret generic credentials --from-literal=password=dojo-demo-42
+kubectl -n mock2-q10 apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: consumer}
+spec:
+  terminationGracePeriodSeconds: 1
+  containers:
+  - name: consumer
+    image: busybox:1.36
+    command: [sleep, '3600']
+    env:
+    - {name: MODE, value: exam}
+    - {name: PASSWORD, value: dojo-demo-42}
+    volumeMounts: [{name: config, mountPath: /etc/dojo, readOnly: true}]
+  volumes:
+  - name: config
+    configMap: {name: settings, items: [{key: app.conf, path: app.conf}]}
+EOF
+kubectl -n mock2-q10 wait --for=condition=Ready pod/consumer --timeout=120s
+'''
+undo = '''
+kubectl -n mock2-q10 delete pod/consumer configmap/settings secret/credentials --ignore-not-found --wait=true
+rm -f -- "$PODDOJO_LAB_DIR/m2-app.conf"
+'''
+
+[[tasks.alternatives]]
+name = '''Secret key named PASSWORD and app.conf mounted with subPath'''
+run = '''
+kubectl -n mock2-q10 create configmap settings --from-literal=MODE=exam --from-literal=app.conf="$(printf 'workers=3\n')"
+kubectl -n mock2-q10 create secret generic credentials --type=Opaque --from-literal=PASSWORD=dojo-demo-42
+kubectl -n mock2-q10 apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: consumer}
+spec:
+  terminationGracePeriodSeconds: 1
+  containers:
+  - name: consumer
+    image: busybox:1.36
+    command: [sleep, '3600']
+    env:
+    - name: MODE
+      valueFrom:
+        configMapKeyRef: {name: settings, key: MODE}
+    - name: PASSWORD
+      valueFrom:
+        secretKeyRef: {name: credentials, key: PASSWORD}
+    volumeMounts: [{name: config, mountPath: /etc/dojo/app.conf, subPath: app.conf, readOnly: true}]
+  volumes:
+  - name: config
+    configMap: {name: settings}
+EOF
+kubectl -n mock2-q10 wait --for=condition=Ready pod/consumer --timeout=120s
+'''
+undo = '''kubectl -n mock2-q10 delete pod/consumer configmap/settings secret/credentials --ignore-not-found --wait=true'''
 
 [[tasks]]
 id = '''q11'''
@@ -649,7 +1383,7 @@ domain = '''config-security'''
 weight = 7
 title = '''Run a least-privilege service account'''
 namespace = '''mock2-q11'''
-task = '''In `mock2-q11`, create ServiceAccount `inspector`, Role `pod-viewer` allowing only get/list/watch on core Pods, and RoleBinding `inspect-pods` binding that account. Create Pod `inspector`, image `busybox:1.36`, running `sleep 3600`, using this account with automountServiceAccountToken=false. Run as UID/GID 1000, non-root, with RuntimeDefault seccomp; drop ALL capabilities, disable privilege escalation, and make the root filesystem read-only. The account must not create Pods or get Secrets.'''
+task = '''In `mock2-q11`, create ServiceAccount `inspector`, Role `pod-viewer` allowing only get/list/watch on core Pods, and RoleBinding `inspect-pods` binding that Role to that account. Create Pod `inspector`, image `busybox:1.36`, running `sleep 3600`, using this account without mounting its API token (automountServiceAccountToken=false). Run as UID/GID 1000, non-root (runAsNonRoot), with the RuntimeDefault seccomp profile; drop ALL capabilities, disable privilege escalation, and make the root filesystem read-only. The account must not be able to do anything else: no creating, changing or deleting Pods, no logs or exec, no Secrets or other resources.'''
 solution = '''
 ```bash
 kubectl -n mock2-q11 create serviceaccount inspector --dry-run=client -o yaml | kubectl apply -f -
@@ -677,32 +1411,322 @@ spec:
       capabilities: {drop: [ALL]}
 EOF
 kubectl -n mock2-q11 wait --for=condition=Ready pod/inspector --timeout=120s
-```'''
+```
+Check the permissions the way the grader does: `kubectl -n mock2-q11 auth can-i delete pods --as=system:serviceaccount:mock2-q11:inspector` must say `no`.'''
 
 [[tasks.checks]]
-name = '''Named identity can read and watch Pods'''
+name = '''Account can get, list and watch Pods'''
 run = '''kubectl -n mock2-q11 get serviceaccount inspector >/dev/null && for verb in get list watch; do test "$(kubectl -n mock2-q11 auth can-i "$verb" pods --as=system:serviceaccount:mock2-q11:inspector)" = yes || exit 1; done; echo ok'''
 equals = '''ok'''
 
 [[tasks.checks]]
-name = '''Created identity cannot create Pods or read Secrets'''
-run = '''kubectl -n mock2-q11 get rolebinding inspect-pods >/dev/null && test "$(kubectl -n mock2-q11 auth can-i create pods --as=system:serviceaccount:mock2-q11:inspector)" = no && test "$(kubectl -n mock2-q11 auth can-i get secrets --as=system:serviceaccount:mock2-q11:inspector)" = no && echo ok'''
+name = '''Account is denied every other verb and resource'''
+run = '''kubectl -n mock2-q11 get rolebinding inspect-pods >/dev/null || exit 1; as=system:serviceaccount:mock2-q11:inspector; for a in 'create pods' 'update pods' 'patch pods' 'delete pods' 'deletecollection pods' 'get pods --subresource=log' 'create pods --subresource=exec' 'get secrets' 'list configmaps' 'list services' 'get deployments.apps' 'create serviceaccounts --subresource=token'; do r=$(kubectl -n mock2-q11 auth can-i $a --as=$as 2>/dev/null); [ "$r" = no ] || { echo "allowed: $a"; exit 0; }; done; echo ok'''
 equals = '''ok'''
 
 [[tasks.checks]]
-name = '''Pod uses the account without mounting its token'''
-run = '''kubectl -n mock2-q11 get pod/inspector -o jsonpath='{.spec.serviceAccountName}{"|"}{.spec.automountServiceAccountToken}''''
-equals = '''inspector|false'''
+name = '''RoleBinding inspect-pods grants Role pod-viewer to the account only'''
+run = '''kubectl -n mock2-q11 get rolebinding/inspect-pods -o jsonpath='{.roleRef.kind}{"|"}{.roleRef.name}{"|"}{.subjects[*].kind}{"|"}{.subjects[*].name}{"|"}{.subjects[*].namespace}''''
+matches = '''^Role\|pod-viewer\|ServiceAccount\|inspector\|(mock2-q11)?$'''
 
 [[tasks.checks]]
-name = '''Container drops privileges and has a read-only root'''
-run = '''kubectl -n mock2-q11 get pod/inspector -o jsonpath='{.spec.containers[0].securityContext.allowPrivilegeEscalation}{"|"}{.spec.containers[0].securityContext.readOnlyRootFilesystem}{"|"}{.spec.containers[0].securityContext.capabilities.drop[0]}''''
-equals = '''false|true|ALL'''
-
-[[tasks.checks]]
-name = '''Non-root Pod runs under the required identity'''
-run = '''kubectl -n mock2-q11 exec inspector -- sh -c 'test "$(id -u)" = 1000 && test "$(id -g)" = 1000 && echo ok''''
+name = '''Pod runs as the account with no API token mounted'''
+run = '''test "$(kubectl -n mock2-q11 get pod/inspector -o jsonpath='{.spec.serviceAccountName}' 2>/dev/null)" = inspector || exit 1; kubectl -n mock2-q11 exec inspector -- sh -c 'test -e /var/run/secrets/kubernetes.io/serviceaccount/token && echo token-mounted || echo ok''''
 equals = '''ok'''
+
+[[tasks.checks]]
+name = '''runAsNonRoot and the RuntimeDefault seccomp profile are in force'''
+run = '''kubectl -n mock2-q11 get pod/inspector -o jsonpath='{.spec.securityContext.runAsNonRoot}{"|"}{.spec.containers[0].securityContext.runAsNonRoot}{"|"}{.spec.securityContext.seccompProfile.type}{"|"}{.spec.containers[0].securityContext.seccompProfile.type}' | awk -F'|' '{ nr = ($2 != "") ? $2 : $1; sc = ($4 != "") ? $4 : $3; print nr "|" sc }''''
+equals = '''true|RuntimeDefault'''
+
+[[tasks.checks]]
+name = '''The process runs as UID 1000 and GID 1000'''
+run = '''kubectl -n mock2-q11 exec inspector -- sh -c 'echo "$(id -u):$(id -g)"''''
+equals = '''1000:1000'''
+
+[[tasks.checks]]
+name = '''No capabilities, no privilege escalation, a seccomp filter and a read-only root'''
+run = '''kubectl -n mock2-q11 get pod/inspector >/dev/null 2>&1 || exit 1; s=$(kubectl -n mock2-q11 exec inspector -- cat /proc/1/status | grep -E '^(CapBnd|NoNewPrivs|Seccomp):' | tr -d ' \t' | tr '\n' ' '); if kubectl -n mock2-q11 exec inspector -- touch /dojo-probe >/dev/null 2>&1; then r=root-writable; else r=root-read-only; fi; echo "$s$r"'''
+equals = '''CapBnd:0000000000000000 NoNewPrivs:1 Seccomp:2 root-read-only'''
+
+[[tasks.negatives]]
+name = '''Role also allows delete on Pods'''
+run = '''
+kubectl -n mock2-q11 create serviceaccount inspector
+kubectl -n mock2-q11 create role pod-viewer --verb=get,list,watch,delete --resource=pods
+kubectl -n mock2-q11 create rolebinding inspect-pods --role=pod-viewer --serviceaccount=mock2-q11:inspector
+kubectl -n mock2-q11 apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: inspector}
+spec:
+  terminationGracePeriodSeconds: 1
+  serviceAccountName: inspector
+  automountServiceAccountToken: false
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    runAsNonRoot: true
+    seccompProfile: {type: RuntimeDefault}
+  containers:
+  - name: inspector
+    image: busybox:1.36
+    command: [sleep, '3600']
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities: {drop: [ALL]}
+EOF
+kubectl -n mock2-q11 wait --for=condition=Ready pod/inspector --timeout=120s
+'''
+undo = '''kubectl -n mock2-q11 delete pod/inspector rolebinding/inspect-pods role/pod-viewer serviceaccount/inspector --ignore-not-found --wait=true'''
+
+[[tasks.negatives]]
+name = '''Role grants get/list/watch on every resource (wildcard)'''
+run = '''
+kubectl -n mock2-q11 create serviceaccount inspector
+kubectl -n mock2-q11 apply -f - <<'EOF'
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: pod-viewer}
+rules:
+- apiGroups: ['*']
+  resources: ['*']
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: inspect-pods}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: pod-viewer}
+subjects:
+- {kind: ServiceAccount, name: inspector, namespace: mock2-q11}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: inspector}
+spec:
+  terminationGracePeriodSeconds: 1
+  serviceAccountName: inspector
+  automountServiceAccountToken: false
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    runAsNonRoot: true
+    seccompProfile: {type: RuntimeDefault}
+  containers:
+  - name: inspector
+    image: busybox:1.36
+    command: [sleep, '3600']
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities: {drop: [ALL]}
+EOF
+kubectl -n mock2-q11 wait --for=condition=Ready pod/inspector --timeout=120s
+'''
+undo = '''kubectl -n mock2-q11 delete pod/inspector rolebinding/inspect-pods role/pod-viewer serviceaccount/inspector --ignore-not-found --wait=true'''
+
+[[tasks.negatives]]
+name = '''Account bound to the built-in view ClusterRole instead of the Role'''
+run = '''
+kubectl -n mock2-q11 create serviceaccount inspector
+kubectl -n mock2-q11 create role pod-viewer --verb=get,list,watch --resource=pods
+kubectl -n mock2-q11 create rolebinding inspect-pods --clusterrole=view --serviceaccount=mock2-q11:inspector
+kubectl -n mock2-q11 apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: inspector}
+spec:
+  terminationGracePeriodSeconds: 1
+  serviceAccountName: inspector
+  automountServiceAccountToken: false
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    runAsNonRoot: true
+    seccompProfile: {type: RuntimeDefault}
+  containers:
+  - name: inspector
+    image: busybox:1.36
+    command: [sleep, '3600']
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities: {drop: [ALL]}
+EOF
+kubectl -n mock2-q11 wait --for=condition=Ready pod/inspector --timeout=120s
+'''
+undo = '''kubectl -n mock2-q11 delete pod/inspector rolebinding/inspect-pods role/pod-viewer serviceaccount/inspector --ignore-not-found --wait=true'''
+
+[[tasks.negatives]]
+name = '''No seccompProfile (Unconfined)'''
+run = '''
+kubectl -n mock2-q11 create serviceaccount inspector
+kubectl -n mock2-q11 create role pod-viewer --verb=get,list,watch --resource=pods
+kubectl -n mock2-q11 create rolebinding inspect-pods --role=pod-viewer --serviceaccount=mock2-q11:inspector
+kubectl -n mock2-q11 apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: inspector}
+spec:
+  terminationGracePeriodSeconds: 1
+  serviceAccountName: inspector
+  automountServiceAccountToken: false
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    runAsNonRoot: true
+  containers:
+  - name: inspector
+    image: busybox:1.36
+    command: [sleep, '3600']
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities: {drop: [ALL]}
+EOF
+kubectl -n mock2-q11 wait --for=condition=Ready pod/inspector --timeout=120s
+'''
+undo = '''kubectl -n mock2-q11 delete pod/inspector rolebinding/inspect-pods role/pod-viewer serviceaccount/inspector --ignore-not-found --wait=true'''
+
+[[tasks.negatives]]
+name = '''runAsNonRoot missing (UID 1000 is set but not enforced)'''
+run = '''
+kubectl -n mock2-q11 create serviceaccount inspector
+kubectl -n mock2-q11 create role pod-viewer --verb=get,list,watch --resource=pods
+kubectl -n mock2-q11 create rolebinding inspect-pods --role=pod-viewer --serviceaccount=mock2-q11:inspector
+kubectl -n mock2-q11 apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: inspector}
+spec:
+  terminationGracePeriodSeconds: 1
+  serviceAccountName: inspector
+  automountServiceAccountToken: false
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    seccompProfile: {type: RuntimeDefault}
+  containers:
+  - name: inspector
+    image: busybox:1.36
+    command: [sleep, '3600']
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities: {drop: [ALL]}
+EOF
+kubectl -n mock2-q11 wait --for=condition=Ready pod/inspector --timeout=120s
+'''
+undo = '''kubectl -n mock2-q11 delete pod/inspector rolebinding/inspect-pods role/pod-viewer serviceaccount/inspector --ignore-not-found --wait=true'''
+
+[[tasks.negatives]]
+name = '''API token still mounted (automount left at its default)'''
+run = '''
+kubectl -n mock2-q11 create serviceaccount inspector
+kubectl -n mock2-q11 create role pod-viewer --verb=get,list,watch --resource=pods
+kubectl -n mock2-q11 create rolebinding inspect-pods --role=pod-viewer --serviceaccount=mock2-q11:inspector
+kubectl -n mock2-q11 apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: inspector}
+spec:
+  terminationGracePeriodSeconds: 1
+  serviceAccountName: inspector
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    runAsNonRoot: true
+    seccompProfile: {type: RuntimeDefault}
+  containers:
+  - name: inspector
+    image: busybox:1.36
+    command: [sleep, '3600']
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities: {drop: [ALL]}
+EOF
+kubectl -n mock2-q11 wait --for=condition=Ready pod/inspector --timeout=120s
+'''
+undo = '''kubectl -n mock2-q11 delete pod/inspector rolebinding/inspect-pods role/pod-viewer serviceaccount/inspector --ignore-not-found --wait=true'''
+
+[[tasks.negatives]]
+name = '''Capabilities not dropped and privilege escalation left on'''
+run = '''
+kubectl -n mock2-q11 create serviceaccount inspector
+kubectl -n mock2-q11 create role pod-viewer --verb=get,list,watch --resource=pods
+kubectl -n mock2-q11 create rolebinding inspect-pods --role=pod-viewer --serviceaccount=mock2-q11:inspector
+kubectl -n mock2-q11 apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: inspector}
+spec:
+  terminationGracePeriodSeconds: 1
+  serviceAccountName: inspector
+  automountServiceAccountToken: false
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    runAsNonRoot: true
+    seccompProfile: {type: RuntimeDefault}
+  containers:
+  - name: inspector
+    image: busybox:1.36
+    command: [sleep, '3600']
+    securityContext:
+      readOnlyRootFilesystem: true
+EOF
+kubectl -n mock2-q11 wait --for=condition=Ready pod/inspector --timeout=120s
+'''
+undo = '''kubectl -n mock2-q11 delete pod/inspector rolebinding/inspect-pods role/pod-viewer serviceaccount/inspector --ignore-not-found --wait=true'''
+
+[[tasks.alternatives]]
+name = '''Token disabled on the ServiceAccount and every setting at container level'''
+run = '''
+kubectl -n mock2-q11 apply -f - <<'EOF'
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: inspector}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: pod-viewer}
+rules:
+- apiGroups: ['']
+  resources: [pods]
+  verbs: [list, watch, get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: inspect-pods}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: pod-viewer}
+subjects:
+- {kind: ServiceAccount, name: inspector, namespace: mock2-q11}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: inspector}
+spec:
+  terminationGracePeriodSeconds: 1
+  serviceAccountName: inspector
+  containers:
+  - name: inspector
+    image: busybox:1.36
+    command: [sleep, '3600']
+    securityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      runAsNonRoot: true
+      seccompProfile: {type: RuntimeDefault}
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities: {drop: [ALL]}
+EOF
+kubectl -n mock2-q11 wait --for=condition=Ready pod/inspector --timeout=120s
+'''
+undo = '''kubectl -n mock2-q11 delete pod/inspector rolebinding/inspect-pods role/pod-viewer serviceaccount/inspector --ignore-not-found --wait=true'''
 
 [[tasks]]
 id = '''q12'''
@@ -772,15 +1796,119 @@ run = '''kubectl -n mock2-q12 get deployment/worker -o jsonpath='{.spec.template
 equals = '''100m|64Mi'''
 
 [[tasks.checks]]
-name = '''Namespace defaults are installed'''
-run = '''kubectl -n mock2-q12 get limitrange/defaults -o jsonpath='{.spec.limits[0].defaultRequest.cpu}{"|"}{.spec.limits[0].defaultRequest.memory}{"|"}{.spec.limits[0].default.cpu}{"|"}{.spec.limits[0].default.memory}''''
+name = '''Namespace defaults are installed for containers'''
+run = '''kubectl -n mock2-q12 get limitrange/defaults -o jsonpath='{.spec.limits[?(@.type=="Container")].defaultRequest.cpu}{"|"}{.spec.limits[?(@.type=="Container")].defaultRequest.memory}{"|"}{.spec.limits[?(@.type=="Container")].default.cpu}{"|"}{.spec.limits[?(@.type=="Container")].default.memory}''''
 equals = '''25m|16Mi|100m|64Mi'''
 
 [[tasks.checks]]
 name = '''Quota remains in place and two replicas become ready'''
-run = '''test "$(kubectl -n mock2-q12 get deployment/worker -o jsonpath='{.spec.template.spec.containers[0].resources.requests.cpu}')" = 50m || exit 1; for i in $(seq 1 45); do test "$(kubectl -n mock2-q12 get deployment/worker -o jsonpath='{.status.readyReplicas}')" = 2 && test "$(kubectl -n mock2-q12 get resourcequota/budget -o jsonpath='{.spec.hard.requests\.cpu}')" = 200m && echo ok && exit 0; sleep 2; done; exit 1'''
+run = '''test "$(kubectl -n mock2-q12 get resourcequota/budget -o jsonpath='{.spec.hard.requests\.cpu}|{.spec.hard.requests\.memory}' 2>/dev/null)" = '200m|256Mi' || { echo 'quota budget changed or removed'; exit 0; }; test "$(kubectl -n mock2-q12 get deployment/worker -o jsonpath='{.spec.replicas}|{.spec.template.spec.containers[0].resources.requests.cpu}')" = '2|50m' || exit 1; for i in $(seq 1 45); do test "$(kubectl -n mock2-q12 get deployment/worker -o jsonpath='{.status.readyReplicas}')" = 2 && echo ok && exit 0; sleep 2; done; exit 1'''
 equals = '''ok'''
 timeout = 110
+
+[[tasks.negatives]]
+name = '''Quota deleted to make room (resources and LimitRange are right)'''
+run = '''
+kubectl -n mock2-q12 delete resourcequota budget
+kubectl -n mock2-q12 set resources deployment worker --requests=cpu=50m,memory=32Mi --limits=cpu=100m,memory=64Mi
+kubectl -n mock2-q12 apply -f - <<'EOF'
+apiVersion: v1
+kind: LimitRange
+metadata: {name: defaults}
+spec:
+  limits:
+  - type: Container
+    defaultRequest: {cpu: 25m, memory: 16Mi}
+    default: {cpu: 100m, memory: 64Mi}
+EOF
+kubectl -n mock2-q12 rollout status deployment/worker --timeout=180s
+'''
+undo = '''
+kubectl -n mock2-q12 delete deployment/worker limitrange/defaults resourcequota/budget --ignore-not-found --wait=true
+kubectl -n mock2-q12 apply -f - <<'EOF'
+apiVersion: v1
+kind: ResourceQuota
+metadata: {name: budget}
+spec:
+  hard:
+    requests.cpu: 200m
+    requests.memory: 256Mi
+    limits.cpu: 400m
+    limits.memory: 512Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: worker}
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: worker}
+  template:
+    metadata:
+      labels: {app: worker}
+    spec:
+      containers:
+      - name: web
+        image: busybox:1.36
+        ports: [{name: http, containerPort: 80}]
+        command: [sleep, "3600"]
+        resources:
+          requests: {cpu: 300m, memory: 32Mi}
+          limits: {cpu: 300m, memory: 64Mi}
+EOF
+'''
+
+[[tasks.negatives]]
+name = '''Requests fixed but the Deployment scaled down to one replica'''
+run = '''
+kubectl -n mock2-q12 set resources deployment worker --requests=cpu=50m,memory=32Mi --limits=cpu=100m,memory=64Mi
+kubectl -n mock2-q12 scale deployment worker --replicas=1
+kubectl -n mock2-q12 apply -f - <<'EOF'
+apiVersion: v1
+kind: LimitRange
+metadata: {name: defaults}
+spec:
+  limits:
+  - type: Container
+    defaultRequest: {cpu: 25m, memory: 16Mi}
+    default: {cpu: 100m, memory: 64Mi}
+EOF
+kubectl -n mock2-q12 rollout status deployment/worker --timeout=180s
+'''
+undo = '''
+kubectl -n mock2-q12 delete deployment/worker limitrange/defaults resourcequota/budget --ignore-not-found --wait=true
+kubectl -n mock2-q12 apply -f - <<'EOF'
+apiVersion: v1
+kind: ResourceQuota
+metadata: {name: budget}
+spec:
+  hard:
+    requests.cpu: 200m
+    requests.memory: 256Mi
+    limits.cpu: 400m
+    limits.memory: 512Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: worker}
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: worker}
+  template:
+    metadata:
+      labels: {app: worker}
+    spec:
+      containers:
+      - name: web
+        image: busybox:1.36
+        ports: [{name: http, containerPort: 80}]
+        command: [sleep, "3600"]
+        resources:
+          requests: {cpu: 300m, memory: 32Mi}
+          limits: {cpu: 300m, memory: 64Mi}
+EOF
+'''
 
 [[tasks]]
 id = '''q13'''
@@ -788,7 +1916,7 @@ domain = '''config-security'''
 weight = 5
 title = '''Discover a custom resource API'''
 namespace = '''mock2-q13'''
-task = '''An extension API has been installed for you. Discover its namespaced resource in group `mock2.poddojo.local` and inspect its schema. Save that group's `kubectl api-resources` output to `$PODDOJO_LAB_DIR/m2-discovery.txt`. In `mock2-q13`, create custom resource `release-note` with spec.message=`exam-ready` and spec.replicas=2. Save `kubectl explain` output for its spec to `$PODDOJO_LAB_DIR/m2-schema.txt`. No controller is installed for this exercise; do not wait for an operator-created workload.'''
+task = '''An extension API has been installed for you. Discover its namespaced resource in group `mock2.poddojo.local` and inspect its schema. Save that group's `kubectl api-resources` output (only that group) to `$PODDOJO_LAB_DIR/m2-discovery.txt`. In `mock2-q13`, create custom resource `release-note` with spec.message=`exam-ready` and spec.replicas=2. Save `kubectl explain` output for its spec to `$PODDOJO_LAB_DIR/m2-schema.txt`. No controller is installed for this exercise; do not wait for an operator-created workload.'''
 setup = [
 '''
 kubectl -n mock2-q13 apply -f - <<'EOF'
@@ -839,14 +1967,67 @@ run = '''kubectl -n mock2-q13 get dojo-notes.mock2.poddojo.local/release-note -o
 equals = '''2'''
 
 [[tasks.checks]]
-name = '''Discovery was saved'''
-run = '''grep 'dojo-notes' "$PODDOJO_LAB_DIR/m2-discovery.txt" | grep 'mock2.poddojo.local/v1' >/dev/null && echo ok'''
+name = '''Discovery of only that group was saved'''
+run = '''f="$PODDOJO_LAB_DIR/m2-discovery.txt"; grep 'dojo-notes' "$f" | grep 'mock2.poddojo.local/v1' >/dev/null || exit 1; test -z "$(grep -v '^NAME' "$f" | grep -v 'mock2.poddojo.local')" && echo ok'''
 equals = '''ok'''
 
 [[tasks.checks]]
-name = '''Schema explanation was saved'''
-run = '''grep 'message' "$PODDOJO_LAB_DIR/m2-schema.txt" >/dev/null && grep 'replicas' "$PODDOJO_LAB_DIR/m2-schema.txt" >/dev/null && echo ok'''
+name = '''Schema explanation of the spec was saved'''
+run = '''grep -w 'message' "$PODDOJO_LAB_DIR/m2-schema.txt" >/dev/null && grep -w 'replicas' "$PODDOJO_LAB_DIR/m2-schema.txt" >/dev/null && echo ok'''
 equals = '''ok'''
+
+[[tasks.negatives]]
+name = '''Whole kubectl api-resources list saved instead of that group'''
+run = '''
+kubectl api-resources > "$PODDOJO_LAB_DIR/m2-discovery.txt"
+kubectl explain dojo-notes.spec --api-version=mock2.poddojo.local/v1 > "$PODDOJO_LAB_DIR/m2-schema.txt"
+kubectl -n mock2-q13 apply -f - <<'EOF'
+apiVersion: mock2.poddojo.local/v1
+kind: DojoNote
+metadata: {name: release-note}
+spec: {message: exam-ready, replicas: 2}
+EOF
+'''
+undo = '''
+kubectl -n mock2-q13 delete dojo-notes.mock2.poddojo.local/release-note --ignore-not-found
+rm -f -- "$PODDOJO_LAB_DIR/m2-discovery.txt" "$PODDOJO_LAB_DIR/m2-schema.txt"
+'''
+
+[[tasks.negatives]]
+name = '''Explain of the whole resource instead of its spec'''
+run = '''
+kubectl api-resources --api-group=mock2.poddojo.local > "$PODDOJO_LAB_DIR/m2-discovery.txt"
+kubectl explain dojo-notes --api-version=mock2.poddojo.local/v1 > "$PODDOJO_LAB_DIR/m2-schema.txt"
+kubectl -n mock2-q13 apply -f - <<'EOF'
+apiVersion: mock2.poddojo.local/v1
+kind: DojoNote
+metadata: {name: release-note}
+spec: {message: exam-ready, replicas: 2}
+EOF
+'''
+undo = '''
+kubectl -n mock2-q13 delete dojo-notes.mock2.poddojo.local/release-note --ignore-not-found
+rm -f -- "$PODDOJO_LAB_DIR/m2-discovery.txt" "$PODDOJO_LAB_DIR/m2-schema.txt"
+'''
+
+[[tasks.alternatives]]
+name = '''Wide discovery output, recursive explain and the short resource name'''
+run = '''
+kubectl api-resources --api-group=mock2.poddojo.local --namespaced=true -o wide > "$PODDOJO_LAB_DIR/m2-discovery.txt"
+kubectl explain dojo-note.spec --recursive > "$PODDOJO_LAB_DIR/m2-schema.txt"
+kubectl -n mock2-q13 apply -f - <<'EOF'
+apiVersion: mock2.poddojo.local/v1
+kind: DojoNote
+metadata: {name: release-note}
+spec:
+  message: exam-ready
+  replicas: 2
+EOF
+'''
+undo = '''
+kubectl -n mock2-q13 delete dojo-notes.mock2.poddojo.local/release-note --ignore-not-found
+rm -f -- "$PODDOJO_LAB_DIR/m2-discovery.txt" "$PODDOJO_LAB_DIR/m2-schema.txt"
+'''
 
 [[tasks]]
 id = '''q14'''
@@ -896,23 +2077,116 @@ run = '''kubectl -n mock2-q14 get service/search -o jsonpath='{.spec.selector.ap
 equals = '''search'''
 
 [[tasks.checks]]
-name = '''Service maps port 8080 to port 80'''
+name = '''Service maps ClusterIP port 8080 to container port 80'''
 run = '''kubectl -n mock2-q14 get service/search -o jsonpath='{.spec.type}{"|"}{.spec.ports[0].port}{"|"}{.spec.ports[0].targetPort}''''
-equals = '''ClusterIP|8080|80'''
+matches = '''^ClusterIP\|8080\|(80|http)$'''
 
 [[tasks.checks]]
-name = '''DNS and Service forwarding work from the client'''
-run = '''kubectl -n mock2-q14 get pod/client >/dev/null 2>&1 || exit 1; for i in $(seq 1 40); do kubectl -n mock2-q14 exec client -- wget -qO- -T 2 http://search:8080/ 2>/dev/null | grep 'Welcome to nginx!' >/dev/null && echo ok && exit 0; sleep 2; done; exit 1'''
+name = '''DNS and Service forwarding work from the long-lived client'''
+run = '''kubectl -n mock2-q14 get pod/client -o jsonpath='{.spec.containers[0].command} {.spec.containers[0].args}' 2>/dev/null | grep -q 14400 || exit 1; for i in $(seq 1 30); do kubectl -n mock2-q14 exec client -- wget -qO- -T 2 http://search:8080/ 2>/dev/null | grep 'Welcome to nginx!' >/dev/null && echo ok && exit 0; sleep 2; done; exit 1'''
 equals = '''ok'''
 timeout = 120
+
+[[tasks.negatives]]
+name = '''Only the selector is repaired (targetPort still 8081)'''
+run = '''
+kubectl -n mock2-q14 patch service search --type=merge -p '{"spec":{"selector":{"app":"search"}}}'
+kubectl -n mock2-q14 run client --image=busybox:1.36 --restart=Never --command -- sleep 14400
+kubectl -n mock2-q14 wait --for=condition=Ready pod/client --timeout=120s
+'''
+undo = '''
+kubectl -n mock2-q14 delete pod/client service/search --ignore-not-found --grace-period=1 --wait=true
+kubectl -n mock2-q14 apply -f - <<'EOF'
+apiVersion: v1
+kind: Service
+metadata: {name: search}
+spec:
+  selector: {app: wrong-search}
+  ports: [{port: 8080, targetPort: 8081}]
+EOF
+'''
+
+[[tasks.alternatives]]
+name = '''Service recreated with kubectl expose and the named targetPort http'''
+run = '''
+kubectl -n mock2-q14 delete service search
+kubectl -n mock2-q14 expose deployment search --port=8080 --target-port=http
+kubectl -n mock2-q14 run client --image=busybox:1.36 --restart=Never -- sleep 14400
+kubectl -n mock2-q14 wait --for=condition=Ready pod/client --timeout=120s
+'''
+undo = '''
+kubectl -n mock2-q14 delete pod/client service/search --ignore-not-found --grace-period=1 --wait=true
+kubectl -n mock2-q14 apply -f - <<'EOF'
+apiVersion: v1
+kind: Service
+metadata: {name: search}
+spec:
+  selector: {app: wrong-search}
+  ports: [{port: 8080, targetPort: 8081}]
+EOF
+'''
 
 [[tasks]]
 id = '''q15'''
 domain = '''networking'''
 weight = 6
-title = '''Describe an Ingress without a controller'''
+title = '''Route a path prefix with an Ingress'''
 namespace = '''mock2-q15'''
-task = '''In `mock2-q15`, create Deployment `docs`, one replica of `nginx:1.27-alpine`, and Service `docs` port 80 targeting port 80. Create networking.k8s.io/v1 Ingress `docs`, ingressClassName `nginx`, routing host `docs.dojo.test` path `/manual` with pathType `Prefix` to Service `docs` port 80. No Ingress controller is installed: only the routing specification and backend readiness are assessed.'''
+task = '''In `mock2-q15`, host `docs.dojo.test` is already served by Ingress `site` (class `traefik`, path `/` to Service `site`). ConfigMap `echo-template` holds an nginx configuration template. Create Deployment `docs`, one replica of `nginx:1.27-alpine`, with environment variable `BACKEND=docs` and ConfigMap `echo-template` mounted at `/etc/nginx/templates`. Expose it as ClusterIP Service `docs` on port 80 targeting port 80. Create networking.k8s.io/v1 Ingress `docs` with ingressClassName `traefik` that sends host `docs.dojo.test` path `/manual` (pathType `Prefix`) to Service `docs` port 80. Requests for `/manual` and `/manual/...` on that host must reach `docs`; every other path keeps reaching `site`, and other hosts must not reach `docs`. Test from inside the cluster with `kubectl -n dojo-ingress exec deploy/probe -- curl -s -H 'Host: docs.dojo.test' http://traefik.dojo-ingress/manual/intro`.'''
+setup = [
+'''
+kubectl -n mock2-q15 apply -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: echo-template}
+data:
+  default.conf.template: |
+    server { listen 80; location / { default_type text/plain; return 200 "${BACKEND} $request_uri\n"; } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: site}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: site}
+  template:
+    metadata:
+      labels: {app: site}
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.27-alpine
+        env: [{name: BACKEND, value: site}]
+        ports: [{name: http, containerPort: 80}]
+        volumeMounts: [{name: templates, mountPath: /etc/nginx/templates}]
+      volumes:
+      - name: templates
+        configMap: {name: echo-template}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: site}
+spec:
+  selector: {app: site}
+  ports: [{port: 80, targetPort: 80}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: site}
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: docs.dojo.test
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service: {name: site, port: {number: 80}}
+EOF''',
+'''kubectl -n mock2-q15 rollout status deployment/site --timeout=180s'''
+]
 solution = '''
 ```bash
 kubectl -n mock2-q15 apply -f - <<'EOF'
@@ -930,7 +2204,286 @@ spec:
       containers:
       - name: web
         image: nginx:1.27-alpine
+        env: [{name: BACKEND, value: docs}]
         ports: [{name: http, containerPort: 80}]
+        volumeMounts: [{name: templates, mountPath: /etc/nginx/templates}]
+      volumes:
+      - name: templates
+        configMap: {name: echo-template}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: docs}
+spec:
+  selector: {app: docs}
+  ports: [{port: 80, targetPort: 80}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: docs}
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: docs.dojo.test
+    http:
+      paths:
+      - path: /manual
+        pathType: Prefix
+        backend:
+          service: {name: docs, port: {number: 80}}
+EOF
+kubectl -n mock2-q15 rollout status deployment/docs --timeout=120s
+kubectl -n dojo-ingress exec deploy/probe -- curl -s -H 'Host: docs.dojo.test' http://traefik.dojo-ingress/manual/intro
+```
+`Prefix` matches whole path segments: `/manual` and `/manual/intro` go to `docs`, `/manualx` does not (it falls back to the `/` rule of Ingress `site`).'''
+
+[[tasks.checks]]
+name = '''Service docs answers on port 80 with the docs backend'''
+run = '''kubectl -n mock2-q15 get service/docs >/dev/null 2>&1 || exit 1; for i in $(seq 1 30); do v=$(kubectl -n dojo-ingress exec deploy/probe -- curl -s --max-time 3 http://docs.mock2-q15.svc:80/svc-check 2>/dev/null); [ "$v" = 'docs /svc-check' ] && echo ok && exit 0; sleep 2; done; echo "got: $v"'''
+equals = '''ok'''
+timeout = 100
+
+[[tasks.checks]]
+name = '''Host docs.dojo.test path /manual/intro is routed to docs'''
+run = '''kubectl -n mock2-q15 get ingress/docs >/dev/null 2>&1 || exit 1; for i in $(seq 1 15); do v=$(kubectl -n dojo-ingress exec deploy/probe -- curl -s --max-time 3 -H 'Host: docs.dojo.test' http://traefik.dojo-ingress/manual/intro 2>/dev/null); [ "$v" = 'docs /manual/intro' ] && echo ok && exit 0; sleep 1; done; echo "got: $v"'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''Prefix semantics: /manual reaches docs, /manualx stays on site'''
+run = '''kubectl -n mock2-q15 get ingress/docs >/dev/null 2>&1 || exit 1; for i in $(seq 1 15); do a=$(kubectl -n dojo-ingress exec deploy/probe -- curl -s --max-time 3 -H 'Host: docs.dojo.test' http://traefik.dojo-ingress/manual 2>/dev/null); b=$(kubectl -n dojo-ingress exec deploy/probe -- curl -s --max-time 3 -H 'Host: docs.dojo.test' http://traefik.dojo-ingress/manualx 2>/dev/null); [ "$a" = 'docs /manual' ] && [ "$b" = 'site /manualx' ] && echo ok && exit 0; sleep 1; done; echo "got: $a / $b"'''
+equals = '''ok'''
+timeout = 120
+
+[[tasks.checks]]
+name = '''Other hosts are not routed to docs'''
+run = '''kubectl -n mock2-q15 get ingress/docs >/dev/null 2>&1 || exit 1; for i in $(seq 1 15); do v=$(kubectl -n dojo-ingress exec deploy/probe -- curl -s --max-time 3 -H 'Host: docs.dojo.test' http://traefik.dojo-ingress/manual/intro 2>/dev/null); [ "$v" = 'docs /manual/intro' ] && break; sleep 1; done; [ "$v" = 'docs /manual/intro' ] || exit 1; w=$(kubectl -n dojo-ingress exec deploy/probe -- curl -s --max-time 3 -H 'Host: www.dojo.test' http://traefik.dojo-ingress/manual/intro 2>/dev/null); case "$w" in docs*) echo "www.dojo.test reached docs";; *) echo ok;; esac'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''Ingress docs uses the traefik class'''
+run = '''kubectl -n mock2-q15 get ingress/docs -o jsonpath='{.spec.ingressClassName}''''
+equals = '''traefik'''
+
+[[tasks.negatives]]
+name = '''pathType Exact instead of Prefix'''
+run = '''
+kubectl -n mock2-q15 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: docs}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: docs}
+  template:
+    metadata:
+      labels: {app: docs}
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.27-alpine
+        env: [{name: BACKEND, value: docs}]
+        volumeMounts: [{name: templates, mountPath: /etc/nginx/templates}]
+      volumes:
+      - name: templates
+        configMap: {name: echo-template}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: docs}
+spec:
+  selector: {app: docs}
+  ports: [{port: 80, targetPort: 80}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: docs}
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: docs.dojo.test
+    http:
+      paths:
+      - path: /manual
+        pathType: Exact
+        backend:
+          service: {name: docs, port: {number: 80}}
+EOF
+kubectl -n mock2-q15 rollout status deployment/docs --timeout=120s
+'''
+undo = '''kubectl -n mock2-q15 delete ingress/docs service/docs deployment/docs --ignore-not-found --wait=true'''
+
+[[tasks.negatives]]
+name = '''Rule written for the wrong host (docs.dojo.local)'''
+run = '''
+kubectl -n mock2-q15 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: docs}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: docs}
+  template:
+    metadata:
+      labels: {app: docs}
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.27-alpine
+        env: [{name: BACKEND, value: docs}]
+        volumeMounts: [{name: templates, mountPath: /etc/nginx/templates}]
+      volumes:
+      - name: templates
+        configMap: {name: echo-template}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: docs}
+spec:
+  selector: {app: docs}
+  ports: [{port: 80, targetPort: 80}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: docs}
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: docs.dojo.local
+    http:
+      paths:
+      - path: /manual
+        pathType: Prefix
+        backend:
+          service: {name: docs, port: {number: 80}}
+EOF
+kubectl -n mock2-q15 rollout status deployment/docs --timeout=120s
+'''
+undo = '''kubectl -n mock2-q15 delete ingress/docs service/docs deployment/docs --ignore-not-found --wait=true'''
+
+[[tasks.negatives]]
+name = '''Ingress backend points at Service port 8080 (the Service listens on 80)'''
+run = '''
+kubectl -n mock2-q15 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: docs}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: docs}
+  template:
+    metadata:
+      labels: {app: docs}
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.27-alpine
+        env: [{name: BACKEND, value: docs}]
+        volumeMounts: [{name: templates, mountPath: /etc/nginx/templates}]
+      volumes:
+      - name: templates
+        configMap: {name: echo-template}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: docs}
+spec:
+  selector: {app: docs}
+  ports: [{port: 80, targetPort: 80}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: docs}
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: docs.dojo.test
+    http:
+      paths:
+      - path: /manual
+        pathType: Prefix
+        backend:
+          service: {name: docs, port: {number: 8080}}
+EOF
+kubectl -n mock2-q15 rollout status deployment/docs --timeout=120s
+'''
+undo = '''kubectl -n mock2-q15 delete ingress/docs service/docs deployment/docs --ignore-not-found --wait=true'''
+
+[[tasks.negatives]]
+name = '''Rule without a host (every host reaches docs)'''
+run = '''
+kubectl -n mock2-q15 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: docs}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: docs}
+  template:
+    metadata:
+      labels: {app: docs}
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.27-alpine
+        env: [{name: BACKEND, value: docs}]
+        volumeMounts: [{name: templates, mountPath: /etc/nginx/templates}]
+      volumes:
+      - name: templates
+        configMap: {name: echo-template}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: docs}
+spec:
+  selector: {app: docs}
+  ports: [{port: 80, targetPort: 80}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: docs}
+spec:
+  ingressClassName: traefik
+  rules:
+  - http:
+      paths:
+      - path: /manual
+        pathType: Prefix
+        backend:
+          service: {name: docs, port: {number: 80}}
+EOF
+kubectl -n mock2-q15 rollout status deployment/docs --timeout=120s
+'''
+undo = '''kubectl -n mock2-q15 delete ingress/docs service/docs deployment/docs --ignore-not-found --wait=true'''
+
+[[tasks.negatives]]
+name = '''ingressClassName nginx (no such controller here)'''
+run = '''
+kubectl -n mock2-q15 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: docs}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: docs}
+  template:
+    metadata:
+      labels: {app: docs}
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.27-alpine
+        env: [{name: BACKEND, value: docs}]
+        volumeMounts: [{name: templates, mountPath: /etc/nginx/templates}]
+      volumes:
+      - name: templates
+        configMap: {name: echo-template}
 ---
 apiVersion: v1
 kind: Service
@@ -954,23 +2507,58 @@ spec:
           service: {name: docs, port: {number: 80}}
 EOF
 kubectl -n mock2-q15 rollout status deployment/docs --timeout=120s
-```'''
+'''
+undo = '''kubectl -n mock2-q15 delete ingress/docs service/docs deployment/docs --ignore-not-found --wait=true'''
 
-[[tasks.checks]]
-name = '''Ingress selects its class and hostname'''
-run = '''kubectl -n mock2-q15 get ingress/docs -o jsonpath='{.spec.ingressClassName}{"|"}{.spec.rules[0].host}''''
-equals = '''nginx|docs.dojo.test'''
-
-[[tasks.checks]]
-name = '''Prefix route targets the required Service'''
-run = '''kubectl -n mock2-q15 get ingress/docs -o jsonpath='{.spec.rules[0].http.paths[0].path}{"|"}{.spec.rules[0].http.paths[0].pathType}{"|"}{.spec.rules[0].http.paths[0].backend.service.name}{"|"}{.spec.rules[0].http.paths[0].backend.service.port.number}''''
-equals = '''/manual|Prefix|docs|80'''
-
-[[tasks.checks]]
-name = '''deployment/docs becomes ready'''
-run = '''kubectl -n mock2-q15 get deployment/docs >/dev/null 2>&1 || exit 1; for i in $(seq 1 45); do v=$(kubectl -n mock2-q15 get deployment/docs -o jsonpath='{.status.readyReplicas}' 2>/dev/null); [ "$v" = "1" ] && echo ok && exit 0; sleep 2; done; exit 1'''
-equals = '''ok'''
-timeout = 110
+[[tasks.alternatives]]
+name = '''Named Service port and Ingress backend port by name'''
+run = '''
+kubectl -n mock2-q15 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: docs}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: docs}
+  template:
+    metadata:
+      labels: {app: docs}
+    spec:
+      containers:
+      - name: web
+        image: nginx:1.27-alpine
+        env: [{name: BACKEND, value: docs}]
+        ports: [{name: http, containerPort: 80}]
+        volumeMounts: [{name: templates, mountPath: /etc/nginx/templates}]
+      volumes:
+      - name: templates
+        configMap: {name: echo-template}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: docs}
+spec:
+  selector: {app: docs}
+  ports: [{name: web, port: 80, targetPort: http}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: docs}
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: docs.dojo.test
+    http:
+      paths:
+      - path: /manual
+        pathType: Prefix
+        backend:
+          service: {name: docs, port: {name: web}}
+EOF
+kubectl -n mock2-q15 rollout status deployment/docs --timeout=120s
+'''
+undo = '''kubectl -n mock2-q15 delete ingress/docs service/docs deployment/docs --ignore-not-found --wait=true'''
 
 [[tasks]]
 id = '''q16'''
@@ -978,7 +2566,49 @@ domain = '''networking'''
 weight = 4
 title = '''Restrict incoming database connections'''
 namespace = '''mock2-q16'''
-task = '''In `mock2-q16`, create NetworkPolicy `database-ingress` selecting Pods with matchLabels app=database. Set policyTypes to Ingress only. Allow incoming TCP 6379 only from Pods in this same namespace with matchLabels role=api. Use one ingress rule with one podSelector peer and one explicit TCP port. Other ingress must be denied for these database Pods. Leave egress unrestricted; no database Pods need to be created.'''
+task = '''In `mock2-q16`, Pod `database` (label app=database) listens on TCP 6379 (data) and TCP 6380 (admin). Client Pods `api` (role=api) and `other` (role=other) run in the same namespace, and another `api` Pod (role=api) runs in namespace `mock2-q16-ext`. Create NetworkPolicy `database-ingress` that selects the database Pods and allows incoming connections only on TCP 6379 and only from Pods labelled role=api in `mock2-q16`. All other ingress to the database (port 6380, the `other` Pod, Pods from other namespaces) must be denied. Do not restrict egress. Test with `kubectl -n mock2-q16 exec api -- wget -q -T 2 -O- http://<database-ip>:6379/`.'''
+setup = [
+'''
+kubectl -n mock2-q16 apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: database, labels: {app: database}}
+spec:
+  terminationGracePeriodSeconds: 1
+  containers:
+  - name: db
+    image: busybox:1.36
+    command: [sh, -c, 'mkdir -p /w && echo ok > /w/index.html && httpd -p 6380 -h /w && httpd -f -p 6379 -h /w']
+    ports: [{name: data, containerPort: 6379}, {name: admin, containerPort: 6380}]
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: api, labels: {role: api}}
+spec:
+  terminationGracePeriodSeconds: 1
+  containers:
+  - {name: client, image: 'busybox:1.36', command: [sleep, '14400']}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: other, labels: {role: other}}
+spec:
+  terminationGracePeriodSeconds: 1
+  containers:
+  - {name: client, image: 'busybox:1.36', command: [sleep, '14400']}
+EOF''',
+'''
+kubectl -n mock2-q16-ext apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: api, labels: {role: api}}
+spec:
+  terminationGracePeriodSeconds: 1
+  containers:
+  - {name: client, image: 'busybox:1.36', command: [sleep, '14400']}
+EOF''',
+'''kubectl -n mock2-q16 wait --for=condition=Ready pod/database pod/api pod/other --timeout=180s && kubectl -n mock2-q16-ext wait --for=condition=Ready pod/api --timeout=180s'''
+]
 solution = '''
 ```bash
 kubectl -n mock2-q16 apply -f - <<'EOF'
@@ -995,22 +2625,157 @@ spec:
         matchLabels: {role: api}
     ports: [{protocol: TCP, port: 6379}]
 EOF
-```'''
+```
+A `podSelector` peer without a `namespaceSelector` only matches Pods in the policy's own namespace, and listing `ports` restricts the rule to 6379. Check it: `ip=$(kubectl -n mock2-q16 get pod database -o jsonpath='{.status.podIP}')`, then `kubectl -n mock2-q16 exec api -- wget -q -T 2 -O- http://$ip:6379/` works while the same request from `other`, to port 6380, or from `mock2-q16-ext` times out.'''
 
 [[tasks.checks]]
-name = '''Policy isolates database ingress only'''
-run = '''kubectl -n mock2-q16 get networkpolicy/database-ingress -o jsonpath='{.spec.podSelector.matchLabels.app}{"|"}{.spec.policyTypes[*]}''''
-equals = '''database|Ingress'''
-
-[[tasks.checks]]
-name = '''Allowed peer is the same-namespace API label'''
-run = '''kubectl -n mock2-q16 get networkpolicy/database-ingress -o jsonpath='{.spec.ingress[0].from[0].podSelector.matchLabels.role}{"|"}{.spec.ingress[0].ports[0].protocol}{"|"}{.spec.ingress[0].ports[0].port}''''
-equals = '''api|TCP|6379'''
-
-[[tasks.checks]]
-name = '''Policy has no wildcard peers or additional ingress rules'''
-run = '''test "$(kubectl -n mock2-q16 get networkpolicy/database-ingress -o jsonpath='{.spec.ingress[1]}')" = '' && test "$(kubectl -n mock2-q16 get networkpolicy/database-ingress -o jsonpath='{.spec.ingress[0].from[1]}')" = '' && test "$(kubectl -n mock2-q16 get networkpolicy/database-ingress -o jsonpath='{.spec.ingress[0].from[0].namespaceSelector}')" = '' && test "$(kubectl -n mock2-q16 get networkpolicy/database-ingress -o jsonpath='{.spec.ingress[0].ports[1]}')" = '' && test "$(kubectl -n mock2-q16 get networkpolicy/database-ingress -o jsonpath='{.spec.ingress[0].ports[0].port}')" = 6379 && echo ok'''
+name = '''role=api in mock2-q16 still reaches the database on 6379'''
+run = '''kubectl -n mock2-q16 get networkpolicy database-ingress >/dev/null 2>&1 || exit 1; ip=$(kubectl -n mock2-q16 get pod database -o jsonpath='{.status.podIP}'); for i in $(seq 1 10); do kubectl -n mock2-q16 exec api -- wget -q -T 2 -O- "http://$ip:6379/" 2>/dev/null | grep -qx ok && echo ok && exit 0; sleep 1; done; echo blocked'''
 equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''role=api cannot reach the admin port 6380'''
+run = '''kubectl -n mock2-q16 get networkpolicy database-ingress >/dev/null 2>&1 || exit 1; ip=$(kubectl -n mock2-q16 get pod database -o jsonpath='{.status.podIP}'); for i in $(seq 1 10); do if ! kubectl -n mock2-q16 exec api -- wget -q -T 2 -O- "http://$ip:6380/" >/dev/null 2>&1; then kubectl -n mock2-q16 exec api -- wget -q -T 2 -O- "http://$ip:6380/" >/dev/null 2>&1 || { echo denied; exit 0; }; fi; sleep 1; done; echo reachable'''
+equals = '''denied'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''Pods without role=api (other) are denied on 6379'''
+run = '''kubectl -n mock2-q16 get networkpolicy database-ingress >/dev/null 2>&1 || exit 1; ip=$(kubectl -n mock2-q16 get pod database -o jsonpath='{.status.podIP}'); for i in $(seq 1 10); do if ! kubectl -n mock2-q16 exec other -- wget -q -T 2 -O- "http://$ip:6379/" >/dev/null 2>&1; then kubectl -n mock2-q16 exec other -- wget -q -T 2 -O- "http://$ip:6379/" >/dev/null 2>&1 || { echo denied; exit 0; }; fi; sleep 1; done; echo reachable'''
+equals = '''denied'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''role=api Pods in another namespace are denied on 6379'''
+run = '''kubectl -n mock2-q16 get networkpolicy database-ingress >/dev/null 2>&1 || exit 1; ip=$(kubectl -n mock2-q16 get pod database -o jsonpath='{.status.podIP}'); for i in $(seq 1 10); do if ! kubectl -n mock2-q16-ext exec api -- wget -q -T 2 -O- "http://$ip:6379/" >/dev/null 2>&1; then kubectl -n mock2-q16-ext exec api -- wget -q -T 2 -O- "http://$ip:6379/" >/dev/null 2>&1 || { echo denied; exit 0; }; fi; sleep 1; done; echo reachable'''
+equals = '''denied'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''Policy does not restrict egress'''
+run = '''kubectl -n mock2-q16 get networkpolicy/database-ingress -o jsonpath='{.spec.policyTypes[*]}''''
+equals = '''Ingress'''
+
+[[tasks.negatives]]
+name = '''Allows 6379 from every Pod in the namespace (podSelector {})'''
+run = '''
+kubectl -n mock2-q16 apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: database-ingress}
+spec:
+  podSelector:
+    matchLabels: {app: database}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector: {}
+    ports: [{protocol: TCP, port: 6379}]
+EOF
+'''
+undo = '''kubectl -n mock2-q16 delete networkpolicy database-ingress --ignore-not-found'''
+
+[[tasks.negatives]]
+name = '''No port restriction (role=api may use every port)'''
+run = '''
+kubectl -n mock2-q16 apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: database-ingress}
+spec:
+  podSelector:
+    matchLabels: {app: database}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels: {role: api}
+EOF
+'''
+undo = '''kubectl -n mock2-q16 delete networkpolicy database-ingress --ignore-not-found'''
+
+[[tasks.negatives]]
+name = '''namespaceSelector {} added to the peer (role=api from every namespace)'''
+run = '''
+kubectl -n mock2-q16 apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: database-ingress}
+spec:
+  podSelector:
+    matchLabels: {app: database}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels: {role: api}
+    ports: [{protocol: TCP, port: 6379}]
+EOF
+'''
+undo = '''kubectl -n mock2-q16 delete networkpolicy database-ingress --ignore-not-found'''
+
+[[tasks.negatives]]
+name = '''Two separate peers (role=api OR every Pod of the namespace) instead of one'''
+run = '''
+kubectl -n mock2-q16 apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: database-ingress}
+spec:
+  podSelector:
+    matchLabels: {app: database}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels: {role: api}
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: mock2-q16}
+    ports: [{protocol: TCP, port: 6379}]
+EOF
+'''
+undo = '''kubectl -n mock2-q16 delete networkpolicy database-ingress --ignore-not-found'''
+
+[[tasks.negatives]]
+name = '''Policy also isolates database egress (policyTypes Ingress and Egress)'''
+run = '''
+kubectl -n mock2-q16 apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: database-ingress}
+spec:
+  podSelector:
+    matchLabels: {app: database}
+  policyTypes: [Ingress, Egress]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels: {role: api}
+    ports: [{protocol: TCP, port: 6379}]
+EOF
+'''
+undo = '''kubectl -n mock2-q16 delete networkpolicy database-ingress --ignore-not-found'''
+
+[[tasks.alternatives]]
+name = '''matchExpressions selectors and the named port data'''
+run = '''
+kubectl -n mock2-q16 apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: database-ingress}
+spec:
+  podSelector:
+    matchExpressions: [{key: app, operator: In, values: [database]}]
+  ingress:
+  - from:
+    - podSelector:
+        matchExpressions: [{key: role, operator: In, values: [api]}]
+    ports: [{port: data}]
+EOF
+'''
+undo = '''kubectl -n mock2-q16 delete networkpolicy database-ingress --ignore-not-found'''
 
 [[tasks]]
 id = '''q17'''
@@ -1018,7 +2783,40 @@ domain = '''networking'''
 weight = 3
 title = '''Default-deny egress for a batch tier'''
 namespace = '''mock2-q17'''
-task = '''In `mock2-q17`, create NetworkPolicy `batch-egress` selecting matchLabels tier=batch, with policyTypes Egress only and no allowed egress rules. Create Pod `batch`, labels tier=batch, image `busybox:1.36`, command `sleep 3600`. Do not isolate ingress or create namespace-wide restrictions. The policy specification is assessed, so DNS exceptions are not required.'''
+task = '''In `mock2-q17`, Pod `batch` (label tier=batch) serves HTTP on port 8080, Pod `web` (label app=web) serves HTTP on port 8080, and Pod `report` (label tier=report) is a client. Create NetworkPolicy `batch-egress` so that Pods labelled tier=batch cannot open any outgoing connection, cluster DNS included. Do not isolate ingress: `report` must still reach `batch` on 8080. Do not create namespace-wide restrictions: `report` must still reach `web`.'''
+setup = [
+'''
+kubectl -n mock2-q17 apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: batch, labels: {tier: batch}}
+spec:
+  terminationGracePeriodSeconds: 1
+  containers:
+  - name: batch
+    image: busybox:1.36
+    command: [sh, -c, 'mkdir -p /w && echo batch > /w/index.html && httpd -f -p 8080 -h /w']
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: web, labels: {app: web}}
+spec:
+  terminationGracePeriodSeconds: 1
+  containers:
+  - name: web
+    image: busybox:1.36
+    command: [sh, -c, 'mkdir -p /w && echo web > /w/index.html && httpd -f -p 8080 -h /w']
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: report, labels: {tier: report}}
+spec:
+  terminationGracePeriodSeconds: 1
+  containers:
+  - {name: client, image: 'busybox:1.36', command: [sleep, '14400']}
+EOF''',
+'''kubectl -n mock2-q17 wait --for=condition=Ready pod/batch pod/web pod/report --timeout=180s'''
+]
 solution = '''
 ```bash
 kubectl -n mock2-q17 apply -f - <<'EOF'
@@ -1030,29 +2828,124 @@ spec:
     matchLabels: {tier: batch}
   policyTypes: [Egress]
   egress: []
----
-apiVersion: v1
-kind: Pod
-metadata: {name: batch, labels: {tier: batch}}
-spec:
-  containers:
-  - name: batch
-    image: busybox:1.36
-    command: [sleep, '3600']
 EOF
-```'''
+```
+`policyTypes: [Egress]` with no egress rules denies every outgoing connection of the selected Pods, DNS included, and leaves their ingress alone. Without `policyTypes` the API would default to `[Ingress]` (there are no egress rules), which isolates ingress and leaves egress open.'''
 
 [[tasks.checks]]
-name = '''Only the batch tier is selected'''
-run = '''kubectl -n mock2-q17 get networkpolicy/batch-egress -o jsonpath='{.spec.podSelector.matchLabels.tier}{"|"}{.spec.policyTypes[*]}''''
-equals = '''batch|Egress'''
+name = '''batch cannot reach web'''
+run = '''kubectl -n mock2-q17 get networkpolicy batch-egress >/dev/null 2>&1 || exit 1; ip=$(kubectl -n mock2-q17 get pod web -o jsonpath='{.status.podIP}'); for i in $(seq 1 10); do if ! kubectl -n mock2-q17 exec batch -- wget -q -T 2 -O- "http://$ip:8080/" >/dev/null 2>&1; then kubectl -n mock2-q17 exec batch -- wget -q -T 2 -O- "http://$ip:8080/" >/dev/null 2>&1 || { echo denied; exit 0; }; fi; sleep 1; done; echo reachable'''
+equals = '''denied'''
+timeout = 90
 
 [[tasks.checks]]
-name = '''Existing policy allows no egress rules'''
-run = '''kubectl -n mock2-q17 get networkpolicy batch-egress >/dev/null && test -z "$(kubectl -n mock2-q17 get networkpolicy/batch-egress -o jsonpath='{.spec.egress[*]}')" && echo ok'''
+name = '''batch cannot use cluster DNS'''
+run = '''kubectl -n mock2-q17 get networkpolicy batch-egress >/dev/null 2>&1 || exit 1; for i in $(seq 1 5); do if ! kubectl -n mock2-q17 exec batch -- timeout 4 nslookup kubernetes.default.svc.cluster.local >/dev/null 2>&1; then kubectl -n mock2-q17 exec batch -- timeout 4 nslookup kubernetes.default.svc.cluster.local >/dev/null 2>&1 || { echo denied; exit 0; }; fi; sleep 1; done; echo resolves'''
+equals = '''denied'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''report still reaches web (no namespace-wide egress block)'''
+run = '''kubectl -n mock2-q17 get networkpolicy batch-egress >/dev/null 2>&1 || exit 1; ip=$(kubectl -n mock2-q17 get pod web -o jsonpath='{.status.podIP}'); for i in $(seq 1 10); do kubectl -n mock2-q17 exec report -- wget -q -T 2 -O- "http://$ip:8080/" 2>/dev/null | grep -qx web && echo ok && exit 0; sleep 1; done; echo blocked'''
 equals = '''ok'''
+timeout = 90
 
 [[tasks.checks]]
-name = '''Batch workload has the selected label'''
-run = '''kubectl -n mock2-q17 get pod/batch -o jsonpath='{.metadata.labels.tier}''''
-equals = '''batch'''
+name = '''report still reaches batch (ingress not isolated)'''
+run = '''kubectl -n mock2-q17 get networkpolicy batch-egress >/dev/null 2>&1 || exit 1; ip=$(kubectl -n mock2-q17 get pod batch -o jsonpath='{.status.podIP}'); for i in $(seq 1 10); do kubectl -n mock2-q17 exec report -- wget -q -T 2 -O- "http://$ip:8080/" 2>/dev/null | grep -qx batch && echo ok && exit 0; sleep 1; done; echo blocked'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.negatives]]
+name = '''Namespace-wide default-deny egress (podSelector {})'''
+run = '''
+kubectl -n mock2-q17 apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: batch-egress}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+EOF
+'''
+undo = '''kubectl -n mock2-q17 delete networkpolicy batch-egress --ignore-not-found'''
+
+[[tasks.negatives]]
+name = '''Policy also isolates ingress (policyTypes Ingress and Egress)'''
+run = '''
+kubectl -n mock2-q17 apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: batch-egress}
+spec:
+  podSelector:
+    matchLabels: {tier: batch}
+  policyTypes: [Ingress, Egress]
+EOF
+'''
+undo = '''kubectl -n mock2-q17 delete networkpolicy batch-egress --ignore-not-found'''
+
+[[tasks.negatives]]
+name = '''policyTypes omitted (defaults to Ingress, egress stays open)'''
+run = '''
+kubectl -n mock2-q17 apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: batch-egress}
+spec:
+  podSelector:
+    matchLabels: {tier: batch}
+EOF
+'''
+undo = '''kubectl -n mock2-q17 delete networkpolicy batch-egress --ignore-not-found'''
+
+[[tasks.negatives]]
+name = '''Egress still allowed to cluster DNS'''
+run = '''
+kubectl -n mock2-q17 apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: batch-egress}
+spec:
+  podSelector:
+    matchLabels: {tier: batch}
+  policyTypes: [Egress]
+  egress:
+  - ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+EOF
+'''
+undo = '''kubectl -n mock2-q17 delete networkpolicy batch-egress --ignore-not-found'''
+
+[[tasks.negatives]]
+name = '''Egress allowed to the web Pods'''
+run = '''
+kubectl -n mock2-q17 apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: batch-egress}
+spec:
+  podSelector:
+    matchLabels: {tier: batch}
+  policyTypes: [Egress]
+  egress:
+  - to:
+    - podSelector:
+        matchLabels: {app: web}
+EOF
+'''
+undo = '''kubectl -n mock2-q17 delete networkpolicy batch-egress --ignore-not-found'''
+
+[[tasks.alternatives]]
+name = '''matchExpressions selector and no egress field at all'''
+run = '''
+kubectl -n mock2-q17 apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: batch-egress}
+spec:
+  podSelector:
+    matchExpressions: [{key: tier, operator: In, values: [batch]}]
+  policyTypes: [Egress]
+EOF
+'''
+undo = '''kubectl -n mock2-q17 delete networkpolicy batch-egress --ignore-not-found'''

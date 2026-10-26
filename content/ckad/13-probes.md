@@ -9,31 +9,31 @@ objectives = ["Choose probes according to traffic eligibility, restart recovery,
 
 [[quiz]]
 q = "Which probe failure normally removes a Pod from ordinary Service traffic without restarting its container?"
-choices = ["Readiness", "Liveness", "Startup after success", "No probe can do this"]
+choices = ["Readiness", "Liveness", "Startup after success", "Liveness with a high failureThreshold"]
 answer = 0
 why = "Readiness controls whether the Pod should receive traffic. Liveness and startup failures past their thresholds trigger container restart behavior, rather than acting only as traffic gates."
 
 [[quiz]]
 q = "What happens to liveness and readiness while a startup probe has not succeeded?"
-choices = ["They run every second", "They are held until startup succeeds", "They are permanently deleted", "Only readiness runs"]
+choices = ["They run every second", "They are held until startup succeeds", "They run, but their failures are ignored", "Only liveness runs"]
 answer = 1
 why = "A startup probe protects slow initialization. It must succeed before liveness and readiness probes start; repeated startup failure still causes restart."
 
 [[quiz]]
 q = "Which successThreshold is valid for liveness?"
-choices = ["Any positive number", "Only 1", "Only 3", "Zero"]
+choices = ["Any positive number", "Only 1", "Any value up to failureThreshold", "At least 2, to avoid flapping"]
 answer = 1
 why = "Liveness and startup require successThreshold 1. Readiness may require multiple consecutive successful checks to rejoin traffic more cautiously."
 
 [[quiz]]
 q = "What does exec command [\"test\", \"-f\", \"/tmp/ready\"] rely on?"
-choices = ["A shell automatically interprets the array", "The executable test exists in the image and returns exit code zero", "An HTTP endpoint exists", "A Service selects the Pod"]
+choices = ["A shell automatically interprets the array", "The executable test exists in the image and returns exit code zero", "The shell resolves test as a builtin command", "The kubelet runs test on the node, not in the container"]
 answer = 1
 why = "Exec launches the listed command without an implicit shell. Explicitly invoke sh -c for shell syntax, and ensure the image contains all required programs."
 
 [[quiz]]
 q = "Which gRPC probe constraint matters?"
-choices = ["It supports named ports exactly like HTTP probes", "It requires a numeric port and the gRPC health checking protocol", "It works against any HTTP/2 route", "It authenticates with a Secret by default"]
+choices = ["It supports named ports exactly like HTTP probes", "It requires a numeric port and the gRPC health checking protocol", "It works against any HTTP/2 route", "It requires TLS to be configured on the probe"]
 answer = 1
 why = "The built-in gRPC action checks the standard health protocol, takes a numeric port, and does not provide TLS/authentication configuration like a full application client."
 

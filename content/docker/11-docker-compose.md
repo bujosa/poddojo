@@ -8,31 +8,31 @@ objectives = ["Define a multi-service application with Compose v2", "Gate startu
 
 [[quiz]]
 q = "Does short-form depends_on guarantee Redis is ready for commands?"
-choices = ["Yes, in every case", "No; use a healthcheck and condition: service_healthy", "Only when Redis uses port 6379", "Only with container_name"]
+choices = ["Yes; Compose waits until the Redis port accepts connections", "No; use a healthcheck and condition: service_healthy", "No; set `restart: always` on the dependent service", "No; use `links:` instead, which waits for readiness"]
 answer = 1
 why = "Creation order is not readiness. Long-form depends_on can wait for a passing dependency healthcheck, but applications still need recovery logic for later outages."
 
 [[quiz]]
 q = "What is the difference between .env and a service env_file?"
-choices = ["Both always inject every variable into every container", ".env is normally an interpolation source; env_file populates the service environment", "env_file changes the daemon environment", "They are only for secrets"]
+choices = ["Both always inject every variable into every container", ".env is normally an interpolation source; env_file populates the service environment", "env_file changes the daemon environment", "env_file feeds interpolation; .env populates the containers"]
 answer = 1
 why = "Compose uses .env values to interpolate the model. A service env_file explicitly passes variables to that service; environment entries can override those values."
 
 [[quiz]]
 q = "Why does every lab command specify -p dojo-compose?"
-choices = ["It changes the Docker context", "It supplies an explicit project identity and predictable resource scope", "It publishes every service port", "It makes Redis data temporary"]
+choices = ["It changes the Docker context", "It supplies an explicit project identity and predictable resource scope", "It publishes every service port", "It selects which compose file to load"]
 answer = 1
 why = "The project name scopes Compose-managed resources. An explicit dojo- project avoids accidental dependence on the lab directory name and makes targeted cleanup reliable."
 
 [[quiz]]
 q = "Which service is easiest to scale with --scale tools=2?"
-choices = ["One with container_name fixed to dojo-tools", "One publishing the same fixed host port for each replica", "One without a fixed container_name or fixed host-port binding", "A named volume"]
+choices = ["One with container_name fixed to dojo-tools", "One publishing the same fixed host port for each replica", "One without a fixed container_name or fixed host-port binding", "One publishing 8080:80 without a container_name"]
 answer = 2
 why = "Replicas need distinct container identities, and a fixed host port cannot be bound by two replicas on the same address. Scale a service whose configuration allows multiple instances."
 
 [[quiz]]
 q = "What extra action does down -v take in this lab?"
-choices = ["Deletes all daemon volumes", "Removes project-declared named volumes and attached anonymous volumes, excluding external volumes", "Only stops the web service", "Deletes all source files"]
+choices = ["Deletes all daemon volumes", "Removes project-declared named volumes and attached anonymous volumes, excluding external volumes", "Also removes the images built for the project", "Removes named volumes, including those marked external"]
 answer = 1
 why = "down removes this project containers and networks; -v also removes its managed volumes. External volumes are not removed. Treat the flag as deliberate data deletion, not routine application restart."
 
@@ -99,6 +99,7 @@ CMD ["python", "-u", "/app/app.py"]
 '''
 "app.py" = '''import os
 import socket
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -139,6 +140,8 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == "/label":
                 value = os.environ["COUNTER_LABEL"]
             elif self.path == "/":
+                # Remember when the counter was first used (UTC, like docker inspect's Created).
+                redis_command("SET", "dojo-first-hit", time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()), "NX")
                 value = redis_command("INCR", "dojo-counter")
             else:
                 self.send_error(404)
@@ -204,6 +207,55 @@ docker compose -p dojo-compose -f compose.yaml logs --tail 20 web redis
 name = "counter state is at least two and available in Redis-backed web"
 run = "v=$(curl -fsS --max-time 3 \"http://$PODDOJO_HOST:18100/value\") && case \"$v\" in ''|*[!0-9]*) exit 1;; esac; test \"$v\" -ge 2 && echo ok"
 equals = "ok"
+
+[[lab.steps.checks]]
+name = "web and redis were recreated after the counter was used"
+run = '''
+hit=$(docker compose -p dojo-compose -f compose.yaml exec -T redis redis-cli GET dojo-first-hit | cut -c1-19)
+[ -n "$hit" ] || { echo "the counter has not been used yet"; exit 1; }
+for svc in redis web; do
+  id=$(docker compose -p dojo-compose -f compose.yaml ps -q "$svc")
+  [ -n "$id" ] || { echo "$svc is not running"; exit 1; }
+  created=$(docker inspect -f '{{.Created}}' "$id" | cut -c1-19)
+  [ "$(printf '%s\n%s\n' "$hit" "$created" | sort | tail -n 1)" = "$created" ] || { echo "$svc was created at $created, before the first request at $hit"; exit 1; }
+done
+echo ok
+'''
+equals = "ok"
+timeout = 60
+
+[[lab.steps.negatives]]
+name = "increments the counter but never recreates the containers"
+run = '''
+curl -fsS "http://$PODDOJO_HOST:18100/"
+curl -fsS "http://$PODDOJO_HOST:18100/"
+sleep 1
+'''
+
+[[lab.steps.negatives]]
+name = "restarts the containers instead of recreating them"
+run = '''
+docker compose -p dojo-compose -f compose.yaml restart redis web
+docker compose -p dojo-compose -f compose.yaml up -d --wait --wait-timeout 90 redis web
+'''
+
+[[lab.steps.negatives]]
+name = "recreates everything but deletes the volume with down -v"
+run = '''
+docker compose -p dojo-compose -f compose.yaml down -v
+docker compose -p dojo-compose -f compose.yaml up -d --wait --wait-timeout 90 redis web
+'''
+
+[[lab.steps.alternatives]]
+name = "down without -v, then up again"
+run = '''
+sleep 1
+curl -fsS "http://$PODDOJO_HOST:18100/"
+curl -fsS "http://$PODDOJO_HOST:18100/"
+docker compose -p dojo-compose -f compose.yaml exec -T redis redis-cli SAVE
+docker compose -p dojo-compose -f compose.yaml down
+docker compose -p dojo-compose -f compose.yaml up -d --wait --wait-timeout 90 redis web
+'''
 
 [[lab.steps]]
 title = "Activate and scale a debug profile"

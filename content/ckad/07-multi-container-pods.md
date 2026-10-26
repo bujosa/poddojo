@@ -17,31 +17,31 @@ q = "What happens after an ordinary init container exits successfully?"
 choices = [
   "The Pod always ends",
   "The next init container or application startup can proceed",
-  "All containers are deleted",
-  "It becomes a Service",
+  "It restarts whenever the main container restarts",
+  "It keeps running alongside the app containers",
 ]
 answer = 1
 why = "Ordinary init containers establish prerequisites in sequence. They do not need to remain running alongside the application."
 
 [[quiz]]
 q = "How is a native sidecar expressed?"
-choices = ["A sidecar: true label", "restartPolicy: Always on an initContainers entry", "A second Pod", "restartPolicy: Never on the Pod"]
+choices = ["An init container with a startupProbe", "restartPolicy: Always on an initContainers entry", "An ordinary container listed first in containers", "restartPolicy: Never on the Pod"]
 answer = 1
 why = "A restartable init container is the native sidecar mechanism. Its container-level policy is distinct from the Pod policy."
 
 [[quiz]]
 q = "Two containers mount the same emptyDir at different paths. Can they share files?"
-choices = ["No, paths must match", "Yes; the volume identity connects the storage", "Only through a Service", "Only with hostPath"]
+choices = ["No, paths must match", "Yes; the volume identity connects the storage", "No; each container gets its own emptyDir copy", "Yes, but only after the writing container exits"]
 answer = 1
 why = "Mount paths are local names for the same volume content. Without a shared mount, identical paths would refer to separate root filesystems."
 
 [[quiz]]
 q = "Why can a classic forever-running sidecar stop a Job from completing?"
 choices = [
-  "It changes the schedule",
+  "It holds the Pod in the Pending phase",
   "It keeps an ordinary application container active",
-  "It disables the API",
-  "It removes all exit codes",
+  "Its liveness probe resets the Job's backoff counter",
+  "The Job waits for its terminationGracePeriodSeconds",
 ]
 answer = 1
 why = "A Job needs its work Pod to finish. Native sidecars have special lifecycle handling so they do not block completion of the ordinary work containers."
@@ -49,10 +49,10 @@ why = "A Job needs its work Pod to finish. Native sidecars have special lifecycl
 [[quiz]]
 q = "Why might a native sidecar need a startup probe?"
 choices = [
-  "To create the shared volume",
+  "To restart it when it stops responding",
   "To delay subsequent startup until its prerequisite is established",
-  "To change the Pod IP",
-  "To skip image pulling",
+  "To remove the Pod from Service endpoints until ready",
+  "To let the Job finish when the sidecar exits",
 ]
 answer = 1
 why = "A running process alone may not mean its service or prepared file is ready. A startup probe defines when that sidecar is considered started."

@@ -109,6 +109,8 @@ mod tests {
             checks: (0..checks)
                 .map(|i| Check { name: format!("c{i}"), run: "true".into(), ..Default::default() })
                 .collect(),
+            negatives: vec![],
+            alternatives: vec![],
         }
     }
 
@@ -124,6 +126,7 @@ mod tests {
             summary: String::new(),
             minutes: 120,
             pass_percent: 66,
+            requires: vec![],
             setup: vec![],
             cleanup: vec![],
             tasks: vec![task("a", "deployment", 10, 2), task("b", "networking", 10, 1)],

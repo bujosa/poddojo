@@ -16,8 +16,8 @@ q = "What is a container, at the operating-system level?"
 choices = [
   "A lightweight virtual machine with its own kernel",
   "One or more ordinary processes isolated with kernel namespaces and limited with cgroups",
-  "A compressed archive that the CPU executes directly",
-  "A Docker-specific file format that only Docker can run",
+  "A chroot directory with its own root filesystem but no resource limits",
+  "A running image: the container and the image are the same object",
 ]
 answer = 1
 why = "Containers share the host's kernel. Namespaces give the process its own view (PIDs, network, mounts, hostname), and cgroups cap the CPU and memory it may use. There is no second kernel, which is why containers start in milliseconds."
@@ -27,7 +27,7 @@ q = "You start three containers from the image `nginx:1.27-alpine`. How many cop
 choices = [
   "Three: one per container",
   "One: the image layers are shared read-only, each container only adds a thin writable layer",
-  "None: images are streamed from the registry every time",
+  "One, but each container copies the full image into its writable layer at start",
   "Four: the image plus one per container",
 ]
 answer = 1
@@ -38,8 +38,8 @@ q = "Inside a container you run `ps` and see your process as PID 1. Why?"
 choices = [
   "The container booted its own init system",
   "The PID namespace gives the container its own numbering, starting at 1",
-  "Docker renames processes before showing them",
-  "It is a bug in ps",
+  "The container runs its own kernel, which numbers processes from 1",
+  "The cgroup assigns each container a fresh PID range starting at 1",
 ]
 answer = 1
 why = "In its own PID namespace the first process is PID 1. On the host the same process has an ordinary, larger PID. This also means PID 1 must handle signals properly, a theme you will meet again with Kubernetes."
@@ -47,10 +47,10 @@ why = "In its own PID namespace the first process is PID 1. On the host the same
 [[quiz]]
 q = "A container started without `--rm` and without a restart policy: what happens when its main process exits?"
 choices = [
-  "The container keeps running in the background",
+  "The container is paused (state `paused`) until you unpause it",
   "Docker restarts it automatically",
   "The container stops (state `exited`), but it still exists until you remove it",
-  "The container and its image are deleted",
+  "The container is removed automatically; only its image remains",
 ]
 answer = 2
 why = "A container lives exactly as long as its main process. When it exits the container moves to `exited`; its writable layer stays until `docker rm`. Restarting only happens if you set a restart policy."

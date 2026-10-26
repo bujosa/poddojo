@@ -243,10 +243,15 @@ impl App {
             if let Err(err) = cluster::guard(&env) {
                 return Done::ExamStarted { exam: exam.id.clone(), ok: false, log: err };
             }
+            let mut log = match lab::provide(&exam.requires, &env) {
+                Ok(log) => log,
+                Err(err) => return Done::ExamStarted { exam: exam.id.clone(), ok: false, log: err },
+            };
             let _ = lab::run_all(&exam.cleanup, &env, Duration::from_secs(300));
             let setup: Vec<String> =
                 exam.setup.iter().chain(exam.tasks.iter().flat_map(|t| &t.setup)).cloned().collect();
-            let (ok, log) = lab::run_all(&setup, &env, Duration::from_secs(600));
+            let (ok, more) = lab::run_all(&setup, &env, Duration::from_secs(600));
+            log.push_str(&more);
             Done::ExamStarted { exam: exam.id.clone(), ok, log }
         });
     }

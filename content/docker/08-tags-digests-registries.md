@@ -14,19 +14,19 @@ why = "The hostname and optional port select the registry. dojo/demo is the repo
 
 [[quiz]]
 q = "A colleague pushes different content under the same v1 tag. What remains immutable?"
-choices = ["The v1 tag", "The manifest digest of the old content", "Every local container using v1 changes", "The registry hostname"]
+choices = ["The v1 tag", "The manifest digest of the old content", "The v1 tag's history, which still points at the old bytes", "The digest of v1, fixed when the tag was first pushed"]
 answer = 1
 why = "Tags are movable references. A digest identifies bytes; changing a manifest changes its digest. Existing containers keep their original image."
 
 [[quiz]]
 q = "Your Docker daemon is remote over SSH. Where does localhost point during docker push localhost:15000/dojo/demo:v1?"
-choices = ["The laptop running the CLI", "The registry container itself", "The Docker daemon machine", "The SSH gateway in every setup"]
+choices = ["The laptop running the CLI", "Inside the registry container's network namespace", "The Docker daemon machine", "The laptop, through a tunnel Docker opens for registries"]
 answer = 2
 why = "The daemon performs the registry transfer. Its localhost is the selected Docker machine. curl runs locally and instead needs PODDOJO_HOST to reach that machine."
 
 [[quiz]]
 q = "Does a digest prove an image comes from a trusted publisher?"
-choices = ["Yes, SHA-256 is a publisher signature", "Only for Alpine images", "No; identity, signatures and vulnerability evidence answer different questions", "Yes, if its tag is v1"]
+choices = ["Yes, SHA-256 is a publisher signature", "Yes, when the image was pulled from Docker Hub", "No; identity, signatures and vulnerability evidence answer different questions", "Yes, because the registry signs the digest it returns"]
 answer = 2
 why = "A digest detects changed content. A verified signature binds that digest to a trusted identity under a policy. An SBOM inventories components; neither by itself establishes that software is vulnerability-free."
 

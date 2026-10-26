@@ -9,31 +9,31 @@ objectives = ["Render and inspect a local chart before installation", "Install a
 
 [[quiz]]
 q = "What is a Helm release?"
-choices = ["The upstream container image tag", "A named installation of a chart with specific values", "A Kubernetes API group", "The directory templates/"]
+choices = ["The upstream container image tag", "A named installation of a chart with specific values", "A packaged chart archive stored in a repository", "The chart version from Chart.yaml"]
 answer = 1
 why = "A chart is a package of templates and defaults. A release is one named installation, scoped to a namespace, with its own revision history."
 
 [[quiz]]
 q = "Which input wins when the same value is supplied by defaults, a values file, and --set?"
-choices = ["The chart default", "The leftmost values file", "The --set override", "The oldest release revision"]
+choices = ["The chart default", "The leftmost values file", "The --set override", "The last values file passed with -f"]
 answer = 2
 why = "Chart defaults are merged with supplied values files, with later files taking precedence, then command-line overrides take precedence. Use --set-string for strings that look like numbers or booleans."
 
 [[quiz]]
 q = "Does helm template normally install anything?"
-choices = ["Yes, all rendered resources", "Only Secrets", "No; it renders manifests for inspection", "Only the namespace"]
+choices = ["Yes, all rendered resources", "Yes, but without running hooks", "No; it renders manifests for inspection", "No, but it validates every resource against the cluster"]
 answer = 2
 why = "Rendering produces YAML without installing the release. Local rendering cannot prove server admission or workload readiness; inspect and then validate against the actual cluster."
 
 [[quiz]]
 q = "After revisions 1 and 2, what does rollback to 1 normally create?"
-choices = ["Revision 0", "A new current revision 3 using revision 1 configuration", "A new release name", "No history entry"]
+choices = ["It reactivates revision 1 and deletes revision 2", "A new current revision 3 using revision 1 configuration", "A new revision 1, renumbering the history", "No new revision; revision 2 is marked failed"]
 answer = 1
 why = "Rollback reuses an earlier stored configuration but advances release history. Helm release revisions and Deployment rollout revisions are separate counters."
 
 [[quiz]]
 q = "Why is --namespace needed with helm list, status, and rollback?"
-choices = ["Helm has no default namespace", "Releases are namespace-scoped and the same name may exist elsewhere", "It changes Docker contexts", "It creates every namespace automatically"]
+choices = ["Helm has no default namespace", "Releases are namespace-scoped and the same name may exist elsewhere", "Helm stores every release in kube-system", "It selects which chart repository to search"]
 answer = 1
 why = "Commands use a namespace when looking up release records. --create-namespace is an installation convenience, not a property of every Helm command."
 
@@ -176,6 +176,15 @@ exit 1
 equals = "ok"
 timeout = 120
 
+[[lab.steps.checks]]
+name = "the latest revision is a rollback to revision 1"
+run = '''helm history dojo-web --namespace helm-lab --max 1 -o json | grep -o '"description":"[^"]*"' '''
+equals = '"description":"Rollback to 1"'
+
+[[lab.steps.negatives]]
+name = "re-applies the original values with an upgrade instead of rolling back"
+run = '''helm upgrade dojo-web ./dojo-chart --namespace helm-lab -f values.yaml --wait --timeout 120s'''
+
 [[lab.steps]]
 title = "Uninstall the release"
 task = '''
@@ -201,6 +210,19 @@ exit 1
 '''
 equals = "ok"
 timeout = 120
+
+[[lab.steps.checks]]
+name = "no release history is retained"
+run = '''helm list --namespace helm-lab --all -q --filter '^dojo-web$'; kubectl -n helm-lab get secrets -l owner=helm,name=dojo-web -o name'''
+equals = ""
+
+[[lab.steps.negatives]]
+name = "uninstalls but keeps the release history"
+run = '''helm uninstall dojo-web --namespace helm-lab --keep-history --wait --timeout 120s'''
+undo = '''
+helm uninstall dojo-web --namespace helm-lab --wait --timeout 120s
+helm install dojo-web ./dojo-chart --namespace helm-lab -f values.yaml --wait --timeout 120s
+'''
 +++
 
 ## Package, installation, history

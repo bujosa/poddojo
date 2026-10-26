@@ -9,25 +9,25 @@ objectives = ["Discover served API groups, versions, resources, and field schema
 
 [[quiz]]
 q = "What does deprecated mean for an API version that is still served?"
-choices = ["It cannot be used at all", "It remains usable but warns of planned removal or replacement", "Its stored objects have already been deleted", "It is always alpha"]
+choices = ["It cannot be used at all", "It remains usable but warns of planned removal or replacement", "It is no longer served unless a feature gate is set", "It is read-only: objects can be listed but not created"]
 answer = 1
 why = "Deprecation gives migration notice. A removed served endpoint instead rejects requests using that version; existing stored objects can often still be accessed through a supported version."
 
 [[quiz]]
 q = "Which command discovers namespaced resource kinds and their API versions?"
-choices = ["kubectl top", "kubectl api-resources --namespaced=true", "kubectl logs --previous", "helm history"]
+choices = ["kubectl api-versions", "kubectl api-resources --namespaced=true", "kubectl explain --api-version=v1", "kubectl get all -A"]
 answer = 1
 why = "api-resources reports discovered kinds, short names, scope, and API versions. api-versions lists served group/version combinations; explain shows fields in a chosen schema."
 
 [[quiz]]
 q = "What is dangerous about changing a policy/v1beta1 PDB with selector {} to policy/v1?"
-choices = ["The new version has no selectors", "The empty selector changes from selecting no Pods to selecting all Pods in the namespace", "It deletes the Deployment", "minAvailable becomes a CPU percentage"]
+choices = ["The new version has no selectors", "The empty selector changes from selecting no Pods to selecting all Pods in the namespace", "policy/v1 rejects an empty selector", "maxUnavailable becomes the default instead"]
 answer = 1
 why = "Migration must preserve intended behavior, not just pass schema validation. Use an explicit matchLabels selector when the intended target is one application."
 
 [[quiz]]
 q = "Which Ingress backend is valid in networking.k8s.io/v1?"
-choices = ["serviceName plus servicePort directly under backend", "service.name plus service.port.number or service.port.name", "deployment.name", "podIP only"]
+choices = ["serviceName plus servicePort directly under backend", "service.name plus service.port.number or service.port.name", "service.name plus service.targetPort.number", "service.name plus a top-level servicePort"]
 answer = 1
 why = "The stable Ingress schema nests the Service reference under backend.service. HTTP paths also require pathType, so changing only apiVersion is insufficient for the old manifest."
 

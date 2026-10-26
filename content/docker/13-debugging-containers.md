@@ -8,38 +8,38 @@ objectives = ["Diagnose container failures from state, logs, configuration and e
 
 [[quiz]]
 q = "A container is absent from docker ps. What should you do first?"
-choices = ["Delete its volume", "List docker ps -a for the named workload", "Assume its image disappeared", "Add a privileged flag"]
+choices = ["Run docker start on it again", "List docker ps -a for the named workload", "Assume its image disappeared", "Check docker images for its image"]
 answer = 1
 why = "docker ps shows running containers. A stopped or never-successfully-started container can still exist and contain useful State.Error, exit status and configuration evidence."
 
 [[quiz]]
 q = "docker exec fails because a container is stopped. What is the next useful tool?"
-choices = ["More exec retries without examining state", "docker logs and docker inspect", "Changing the default Docker context", "Publishing every container port"]
+choices = ["docker exec with --privileged", "docker logs and docker inspect", "docker attach to its main process", "docker top to list its processes"]
 answer = 1
 why = "exec requires a running container. Logs and inspection work for retained stopped containers, and inspect can explain a startup failure that produced no application log at all."
 
 [[quiz]]
 q = "nginx responds from inside the container, but the host URL fails. What do you inspect next?"
-choices = ["Only the image layers", "PortBindings, published host port and host reachability", "The CPU architecture first in every case", "The named volume contents"]
+choices = ["The EXPOSE metadata of the image", "PortBindings, published host port and host reachability", "The container's aliases on its bridge network", "The container's healthcheck status"]
 answer = 1
 why = "An internal response proves part of the application path. The remaining path includes listener binding, publication, the selected host address and any external filtering."
 
 [[quiz]]
 q = "A standalone Docker container becomes unhealthy while its main process keeps running. What is automatic?"
-choices = ["Docker always restarts it", "Docker deletes its image", "Docker records unhealthy status; ordinary restart policies do not restart solely for this status", "Docker switches the healthcheck to another port"]
+choices = ["Docker always restarts it", "Docker sends SIGTERM and lets the restart policy act", "Docker records unhealthy status; ordinary restart policies do not restart solely for this status", "Docker disconnects it from its networks until it is healthy"]
 answer = 2
 why = "Health status and process lifecycle are separate. Inspect State.Health.Log for probe output. A restart policy is normally triggered by process exit, not merely an unhealthy result."
 
 [[quiz]]
 q = "Which pair most strongly supports a container-level OOM diagnosis?"
-choices = ["Exit 0 and healthy", "Exit 137 plus OOMKilled true", "Exit 127 plus no logs", "An unpublished port plus exit 1"]
+choices = ["Exit 143 plus OOMKilled false", "Exit 137 plus OOMKilled true", "Exit 127 plus no logs", "Exit 137 plus a memory limit being set"]
 answer = 1
 why = "Exit 137 alone can also mean another SIGKILL. The OOMKilled flag provides memory-specific evidence, which should be combined with logs, limits and observed behavior."
 
 [lab]
 summary = "Repair four deliberately broken, precisely named containers by diagnosing their process, network and health state."
 setup = ["docker rm -f dojo-debug-crash dojo-debug-command dojo-debug-port dojo-debug-health 2>/dev/null || true", "docker run -d --name dojo-debug-crash --restart on-failure:5 alpine:3.20 sh -c 'echo \"fatal: required APP_MODE=serve\" >&2; exit 1' ", "docker create --name dojo-debug-command alpine:3.20 sleeeep 3600", "docker start dojo-debug-command >/dev/null 2>&1 || true", "docker run -d --name dojo-debug-port nginx:1.27-alpine", "docker run -d --name dojo-debug-health --health-cmd 'wget -qO- http://127.0.0.1:81/ >/dev/null || exit 1' --health-interval 2s --health-timeout 2s --health-retries 2 nginx:1.27-alpine"]
-cleanup = ["docker rm -f dojo-debug-crash dojo-debug-command dojo-debug-port dojo-debug-health 2>/dev/null || true"]
+cleanup = ["docker rm -f dojo-debug-crash dojo-debug-command dojo-debug-port dojo-debug-health dojo-debug-probe 2>/dev/null || true"]
 
 [[lab.steps]]
 title = "Fix the crash-looping workload"
@@ -112,6 +112,54 @@ name = "configured healthcheck is healthy and nginx serves HTTP internally"
 run = "for i in $(seq 1 30); do if test \"$(docker inspect -f '{{.State.Running}} {{.State.Health.Status}}' dojo-debug-health)\" = 'true healthy' && docker exec dojo-debug-health wget -qO- -T 2 http://127.0.0.1:80/ | grep -q 'Welcome to nginx'; then echo ok; exit 0; fi; sleep 2; done; exit 1"
 equals = "ok"
 timeout = 90
+
+[[lab.steps.checks]]
+name = "the healthcheck fails when nothing serves HTTP (it really tests nginx)"
+run = '''
+case "$(docker inspect -f '{{if .Config.Healthcheck}}{{index .Config.Healthcheck.Test 0}}{{end}}' dojo-debug-health)" in
+  CMD-SHELL) probe=$(docker inspect -f '{{index .Config.Healthcheck.Test 1}}' dojo-debug-health) ;;
+  CMD) probe=$(docker inspect -f '{{range $i, $a := .Config.Healthcheck.Test}}{{if $i}}'"'"'{{$a}}'"'"' {{end}}{{end}}' dojo-debug-health) ;;
+  *) echo "no healthcheck configured"; exit 1 ;;
+esac
+docker rm -f dojo-debug-probe >/dev/null 2>&1 || true
+if docker run --rm --name dojo-debug-probe --entrypoint sh nginx:1.27-alpine -c "$probe" >/dev/null 2>&1; then
+  echo "the probe succeeds even with nginx stopped: $probe"
+else
+  echo ok
+fi
+'''
+equals = "ok"
+timeout = 60
+
+[[lab.steps.negatives]]
+name = "replaces the probe with an unconditional success"
+run = '''
+docker rm -f dojo-debug-health
+docker run -d --name dojo-debug-health --health-cmd true --health-interval 2s --health-retries 3 nginx:1.27-alpine
+sleep 6
+'''
+
+[[lab.steps.negatives]]
+name = "masks the failing probe with || true"
+run = '''
+docker rm -f dojo-debug-health
+docker run -d --name dojo-debug-health --health-cmd 'wget -qO- http://127.0.0.1:80/ >/dev/null || true' --health-interval 2s --health-retries 3 nginx:1.27-alpine
+sleep 6
+'''
+
+[[lab.steps.negatives]]
+name = "disables the healthcheck"
+run = '''
+docker rm -f dojo-debug-health
+docker run -d --name dojo-debug-health --no-healthcheck nginx:1.27-alpine
+'''
+
+[[lab.steps.alternatives]]
+name = "a wget --spider probe against localhost:80"
+run = '''
+docker rm -f dojo-debug-health
+docker run -d --name dojo-debug-health --health-cmd 'wget -q --spider http://localhost:80/' --health-interval 2s --health-timeout 2s --health-retries 3 nginx:1.27-alpine
+'''
 +++
 
 ## Debug from the outside inward

@@ -24,8 +24,10 @@ PODDOJO_CONTENT_DIR=content cargo run -q -p dojo -- verify <lesson-id|docker|cka
 ```
 
 `dojo verify` runs the lab for real on the chosen machine: reset → setup → for every step, the
-checks must **fail** before the step's solution runs, the solution's `bash` blocks run with `set -e`,
-then every check must **pass** → cleanup. A lesson is not done until it verifies.
+checks must **fail** before the step's solution runs, every negative case must **fail** and every
+alternative must **pass** (see below), the solution's `bash` blocks run with `set -e`, then every
+check must **pass** → cleanup. A lesson is not done until it verifies.
+`dojo verify exam:ckad-mock-1/q16` verifies one exam task (the whole exam setup still runs).
 
 ## A lesson
 
@@ -37,6 +39,7 @@ module = "config-security"             # a module id from track.toml
 minutes = 30                           # honest estimate: reading + quiz + lab
 domain = "config-security"             # CKAD domain id (CKAD lessons only)
 needs = "cluster"                      # "docker" | "cluster" | "none"
+requires = ["two-nodes"]               # optional, cluster lessons only: "two-nodes", "ingress-controller"
 objectives = ["…", "…"]                # 3–5, each starting with a verb
 
 [[quiz]]                               # 4–6 questions
@@ -68,10 +71,29 @@ run = "…"                              # read-only command
 equals = "…"                           # or contains = / matches = (regex) / nothing (exit 0 only)
 # exit = 1                             # when the command is expected to fail
 # timeout = 60                         # seconds (default 30)
+
+[[lab.steps.negatives]]                # 0+: incomplete or wrong work the checks must reject
+name = "…"                             # what the work gets wrong, in plain words
+run = '''…'''                          # shell (set -e), from the state the step starts in
+undo = '''…'''                         # optional: restore that state for the next case / solution
+
+[[lab.steps.alternatives]]             # 0+: different, equally correct work the checks must accept
+name = "…"
+run = '''…'''
+undo = '''…'''
 +++
 
 ## Concepts in Markdown…
 ```
+
+### The quiz
+
+Choices are shuffled at display time, so author them in any order. Every distractor must be
+something a learner could genuinely believe: a real field, flag, value or behaviour from a
+neighbouring concept (`IfNotPresent` vs. `Always`, `Prefix` vs. `Exact`, a Role vs. a ClusterRole), or
+a common misconception. Never invent values that do not exist (`DownloadOnce`, `OnlyLatest`): a
+learner who knows the real names eliminates them without understanding the question. Keep the
+choices similar in length and form, so the longest or most specific one is not a giveaway.
 
 ### The body (concepts)
 
@@ -83,6 +105,21 @@ equals = "…"                           # or contains = / matches = (regex) / n
 - English only. Kubernetes-accurate for **v1.37** (CKAD curriculum v1.37). Use current APIs
   (`apps/v1`, `batch/v1`, `networking.k8s.io/v1`, `autoscaling/v2`, native sidecars with
   `restartPolicy: Always` init containers, `kubectl debug`, …).
+
+### Negative and alternative cases
+
+A grader is only as good as the wrong answers it rejects. For every step whose checks could be
+fooled, add a `negatives` case that does the tempting shortcut (an unconditional healthcheck, an
+uninstall that keeps history, a policy that allows too much) and make sure a check rejects it. When a
+task can be solved in more than one correct way (imperative vs. YAML, a named port vs. a number, a
+different but equivalent selector), add an `alternatives` case so the checks do not grade the typing.
+`dojo verify` runs the cases in order, after the "fails before" check and before the worked
+solution, each followed by its `undo`. Cases are never shown to learners. Exam tasks take the same
+`[[tasks.negatives]]` / `[[tasks.alternatives]]` tables.
+
+Prefer **behavioural** checks: send the request, open the connection, read the value the app serves.
+A check that only compares YAML fields grades transcription, and a learner who solves the problem
+differently (or breaks it in a way the field does not show) is graded wrongly.
 
 ## The lab environment
 
@@ -100,9 +137,39 @@ Every command (setup, checks, solutions, and what the learner types in the termi
 The lab cluster is kind with one control-plane node and one worker node, the default CNI (kindnet,
 which enforces NetworkPolicies) and the `standard` StorageClass (local-path, `WaitForFirstConsumer`).
 Container port `30080` and `30443` on the control-plane node are published on the machine, so a
-NodePort Service on `30080` is reachable at `http://$PODDOJO_HOST:30080`. No Ingress controller and no
-metrics-server are installed by default: a lab that needs one installs it in `setup` (and checks that
-need a controller must allow time), or checks the objects' spec only.
+NodePort Service on `30080` is reachable at `http://$PODDOJO_HOST:30080`. The worker node can be
+turned off in Settings: a lab that needs two nodes (scheduling, spreading, draining) declares
+`requires = ["two-nodes"]` and gets a clear message on a one-node cluster. No metrics-server is
+installed.
+
+**Ingress.** A lab or exam that declares `requires = ["ingress-controller"]` gets PodDojo's Traefik
+controller (`crates/runner/assets/ingress-controller.yaml`), installed idempotently before setup:
+
+| What | Where |
+|---|---|
+| Controller | Deployment `traefik` in namespace `dojo-ingress`; handles every IngressClass whose `spec.controller` is `traefik.io/ingress-controller`, including the ready-made class `traefik` |
+| HTTP / HTTPS inside the cluster | `http://traefik.dojo-ingress` (port 80) and `https://traefik.dojo-ingress` (port 443, TLS from the Ingress `tls` Secrets) |
+| HTTPS from the machine | `https://$PODDOJO_HOST:30443` (NodePort) |
+| A curl client | Deployment `probe` in `dojo-ingress` (`curlimages/curl:8.13.0`) |
+
+Grade routing by sending requests, not by reading the spec:
+
+```bash
+# Host + path routing: backends answer with their name and the path they received.
+kubectl -n dojo-ingress exec deploy/probe -- curl -sS --max-time 3 -H 'Host: shop.dojo.test' http://traefik.dojo-ingress/shop/cart
+# TLS: verify the certificate the controller serves against the Secret the learner created.
+kubectl -n ingress-lab get secret shop-tls -o go-template='{{index .data "tls.crt" | base64decode}}' |
+  kubectl -n dojo-ingress exec -i deploy/probe -- sh -c 'cat > /tmp/ca.pem && curl -sS --max-time 3 --cacert /tmp/ca.pem --connect-to shop.dojo.test:443:traefik.dojo-ingress:443 https://shop.dojo.test/shop'
+```
+
+Traefik picks up Ingress changes within a second or two, so routing checks should poll briefly.
+Backends that tell themselves apart are easiest with `nginx:1.27-alpine` and a ConfigMap template
+mounted at `/etc/nginx/templates` (the image runs `envsubst` on it at start):
+`return 200 "${BACKEND} $request_uri\n";`.
+
+**NetworkPolicy.** kindnet enforces policies, so grade them by connecting: setup creates the server
+Pods and labelled client Pods, and checks run `kubectl exec <client> -- wget -q -T 2 -O- http://<ip>:<port>/`
+(or `nc -z -w 2`) for the connections that must work **and** the ones that must be blocked.
 
 ### Rules (the validator enforces the first ones)
 
@@ -129,7 +196,8 @@ need a controller must allow time), or checks the objects' spec only.
    heredocs (`kubectl apply -f - <<'EOF' … EOF`) or write files with `cat > file <<'EOF'`. Mention the
    interactive way (the exam way) in prose.
 7. **Pin small public images**: `alpine:3.20`, `busybox:1.36`, `nginx:1.27-alpine`,
-   `python:3.12-alpine`, `redis:7.4-alpine`, `httpd:2.4-alpine`, `registry:2`. Never `:latest`.
+   `python:3.12-alpine`, `redis:7.4-alpine`, `httpd:2.4-alpine`, `registry:2`, `curlimages/curl:8.13.0`.
+   Never `:latest`.
    Images built in a Docker lab are tagged `dojo/<name>:<tag>`; to use one in the cluster load it
    with `kind load docker-image dojo/<name>:<tag> --name poddojo` and set `imagePullPolicy: IfNotPresent`.
 8. **Offline-friendly where possible**: Helm labs use a local chart (`helm create`) instead of a
@@ -147,6 +215,7 @@ minutes = 120
 pass_percent = 66
 setup = ["…"]                 # shared preparation (namespaces…)
 cleanup = ["…"]               # removes every namespace / object the exam created
+requires = ["ingress-controller"]  # optional, as for lessons
 
 [[tasks]]                     # 15–20 tasks; weights sum to 100; domains follow the CKAD weights
 id = "q01"

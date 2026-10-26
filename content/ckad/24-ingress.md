@@ -4,12 +4,13 @@ title = "Ingress: hosts, paths and TLS"
 module = "networking"
 minutes = 40
 needs = "cluster"
+requires = ["ingress-controller"]
 objectives = ["Distinguish an Ingress resource from its controller and class", "Build host and path rules using the v1 API", "Configure a default backend and TLS Secret reference", "Explain controller-specific behavior and the Gateway API model"]
 domain = "networking"
 
 [[quiz]]
 q = "What makes an Ingress resource forward HTTP traffic?"
-choices = ["Creating the resource alone", "A running compatible controller that handles its class", "A kubelet on the client", "The TLS Secret alone"]
+choices = ["Creating the resource alone", "A running compatible controller that handles its class", "A LoadBalancer Service for each backend", "The TLS Secret alone"]
 answer = 1
 why = "The API stores the desired route. A controller watches the class and configures a data plane; object creation does not install that controller."
 
@@ -21,9 +22,9 @@ why = "Ingress backends reference a Service in the same namespace and one of its
 
 [[quiz]]
 q = "Which request matches Prefix /tea but not Exact /tea?"
-choices = ["/tea", "/tea/cup", "/teapot", "/coffee"]
+choices = ["/tea", "/tea/cup", "/teapot", "/Tea"]
 answer = 1
-why = "Prefix matches complete slash-separated path elements. It includes /tea/cup, while /teapot is not a match. Exact requires the complete, case-sensitive path."
+why = "Prefix matches complete slash-separated path elements. It includes /tea/cup, while /teapot is not a match. Both types are case-sensitive, so /Tea matches neither; Exact requires the complete path."
 
 [[quiz]]
 q = "What does a TLS section with secretName guarantee without a controller?"
@@ -33,19 +34,80 @@ why = "The TLS section references a Secret. Certificate issuance, listener confi
 
 [[quiz]]
 q = "How do portable Ingress annotations behave?"
-choices = ["All controllers implement the same rewrite keys", "Annotations are controller-specific extensions", "They replace pathType in v1", "They install the selected controller"]
+choices = ["All controllers implement the same rewrite keys", "Annotations are controller-specific extensions", "Unknown annotations make the API reject the Ingress", "They are standardized under the networking.k8s.io prefix"]
 answer = 1
 why = "The core API standardizes hosts, paths and backends. Rewrite, authentication and timeout annotations depend on the chosen controller and should not be copied across implementations blindly."
 
 [lab]
-summary = "Declare portable HTTP routes and TLS without installing an Ingress controller."
-setup = ["kubectl create namespace ingress-lab --dry-run=client -o yaml | kubectl apply -f -", "kubectl apply -f - <<'EOF'\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\n  namespace: ingress-lab\nspec:\n  replicas: 2\n  selector:\n    matchLabels: {app: web}\n  template:\n    metadata:\n      labels: {\"app\": \"web\"}\n    spec:\n      containers:\n      - name: web\n        image: nginx:1.27-alpine\n        ports:\n        - name: http\n          containerPort: 80\n        readinessProbe:\n          httpGet: {path: /, port: http}\n          periodSeconds: 2\nEOF\nkubectl -n ingress-lab rollout status deployment/web --timeout=120s", "kubectl apply -f - <<'EOF'\napiVersion: v1\nkind: Service\nmetadata:\n  name: web\n  namespace: ingress-lab\nspec:\n  type: ClusterIP\n  selector: {app: web}\n  ports:\n  - name: http\n    port: 80\n    targetPort: http\nEOF", "kubectl apply -f - <<'EOF'\napiVersion: v1\nkind: Service\nmetadata:\n  name: fallback\n  namespace: ingress-lab\nspec:\n  type: ClusterIP\n  selector: {app: web}\n  ports:\n  - name: http\n    port: 80\n    targetPort: http\nEOF"]
-cleanup = ["kubectl delete namespace ingress-lab --ignore-not-found --wait=false || true", "kubectl delete ingressclass dojo-traefik --ignore-not-found || true", "rm -f shop.key shop.crt shop.cnf || true"]
+summary = "Route real HTTP and HTTPS traffic through the lab's Traefik controller: a class, host and path rules to distinct backends, a default backend and TLS."
+setup = [
+'''kubectl create namespace ingress-lab --dry-run=client -o yaml | kubectl apply -f -''',
+'''kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: echo
+  namespace: ingress-lab
+data:
+  default.conf.template: |
+    server {
+      listen 80;
+      location / { default_type text/plain; return 200 "${BACKEND} $request_uri\n"; }
+    }
+EOF''',
+'''for app in web status fallback; do
+kubectl apply -f - <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: $app
+  namespace: ingress-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: $app}
+  template:
+    metadata:
+      labels: {app: $app}
+    spec:
+      containers:
+      - name: echo
+        image: nginx:1.27-alpine
+        env:
+        - {name: BACKEND, value: $app}
+        ports:
+        - {name: http, containerPort: 80}
+        readinessProbe:
+          httpGet: {path: /, port: http}
+          periodSeconds: 2
+        volumeMounts:
+        - {name: templates, mountPath: /etc/nginx/templates}
+      volumes:
+      - name: templates
+        configMap: {name: echo}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: $app
+  namespace: ingress-lab
+spec:
+  selector: {app: $app}
+  ports:
+  - {name: http, port: 80, targetPort: http}
+EOF
+done
+kubectl -n ingress-lab rollout status deployment/web --timeout=120s
+kubectl -n ingress-lab rollout status deployment/status --timeout=120s
+kubectl -n ingress-lab rollout status deployment/fallback --timeout=120s'''
+]
+cleanup = ["kubectl delete namespace ingress-lab --ignore-not-found --wait=false || true", "kubectl delete ingressclass dojo-traefik --ignore-not-found || true", "rm -rf shop.key shop.crt shop.cnf wrong || true"]
 
 [[lab.steps]]
-title = "Declare who would handle these routes"
-task = "Create cluster-scoped IngressClass dojo-traefik with spec.controller traefik.io/ingress-controller. Do not install a controller or mark this class as the cluster default."
+title = "Declare who handles these routes"
+task = "The lab cluster runs a Traefik Ingress controller (namespace dojo-ingress) that serves every IngressClass whose controller is traefik.io/ingress-controller. Create cluster-scoped IngressClass dojo-traefik with spec.controller traefik.io/ingress-controller. Do not mark it as the cluster default."
 solution = '''```bash
+kubectl get ingressclass
 kubectl apply -f - <<'EOF'
 apiVersion: networking.k8s.io/v1
 kind: IngressClass
@@ -55,34 +117,119 @@ spec:
   controller: traefik.io/ingress-controller
 EOF
 ```'''
-hints = ["IngressClass is cluster-scoped and needs the dojo- prefix.", "Its controller string identifies an implementation; it is not an image name."]
+hints = ["IngressClass is cluster-scoped; `kubectl get ingressclass traefik -o yaml` shows the shape.", "Its controller string identifies an implementation; it is not an image name."]
 
 [[lab.steps.checks]]
 name = "the class names the Traefik controller"
 run = '''kubectl get ingressclass dojo-traefik -o jsonpath='{.spec.controller}''''
 equals = "traefik.io/ingress-controller"
 
+[[lab.steps.checks]]
+name = "the class is not the cluster default"
+run = '''kubectl get ingressclass dojo-traefik -o name >/dev/null && kubectl get ingressclass dojo-traefik -o jsonpath='{.metadata.annotations.ingressclass\.kubernetes\.io/is-default-class}' && echo checked'''
+equals = "checked"
+
+[[lab.steps.negatives]]
+name = "points the class at another controller"
+run = '''
+kubectl apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: dojo-traefik
+spec:
+  controller: k8s.io/ingress-nginx
+EOF
+'''
+undo = '''kubectl delete ingressclass dojo-traefik --ignore-not-found'''
+
+[[lab.steps.negatives]]
+name = "marks the class as the cluster default"
+run = '''
+kubectl apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: dojo-traefik
+  annotations:
+    ingressclass.kubernetes.io/is-default-class: "true"
+spec:
+  controller: traefik.io/ingress-controller
+EOF
+'''
+undo = '''kubectl delete ingressclass dojo-traefik --ignore-not-found'''
+
 [[lab.steps]]
 title = "Route a host and a path prefix"
-task = "In ingress-lab create Ingress shop using class dojo-traefik. Route host shop.dojo.test and Prefix path /shop to Service web, Service port 80. No address or successful HTTP request is required."
+task = "In ingress-lab create Ingress shop using class dojo-traefik. Route host shop.dojo.test and Prefix path /shop to Service web, Service port 80. Then send a request through the controller: `kubectl -n dojo-ingress exec deploy/probe -- curl -s -H 'Host: shop.dojo.test' http://traefik.dojo-ingress/shop/cart` must answer `web /shop/cart`. Other hosts, and paths such as /shopping, must not reach web."
 solution = '''```bash
 kubectl -n ingress-lab create ingress shop --class=dojo-traefik --rule="shop.dojo.test/shop*=web:80" --dry-run=client -o yaml | kubectl apply -f -
+sleep 3
+kubectl -n dojo-ingress exec deploy/probe -- curl -s -H 'Host: shop.dojo.test' http://traefik.dojo-ingress/shop/cart
 ```'''
-hints = ["kubectl create ingress uses a trailing * in its rule syntax to generate Prefix.", "The * is generator syntax; the stored path should be /shop."]
+hints = ["kubectl create ingress uses a trailing * in its rule syntax to generate Prefix.", "The echo backends answer with their name and the path they received."]
 
 [[lab.steps.checks]]
-name = "host and class are set"
-run = '''kubectl -n ingress-lab get ingress shop -o jsonpath='{.spec.ingressClassName}{" "}{.spec.rules[0].host}''''
-equals = "dojo-traefik shop.dojo.test"
+name = "the Ingress uses class dojo-traefik"
+run = '''kubectl -n ingress-lab get ingress shop -o jsonpath='{.spec.ingressClassName}''''
+equals = "dojo-traefik"
 
 [[lab.steps.checks]]
-name = "the prefix routes to the Service port"
-run = '''kubectl -n ingress-lab get ingress shop -o jsonpath='{.spec.rules[0].http.paths[?(@.path=="/shop")].pathType}{" "}{.spec.rules[0].http.paths[?(@.path=="/shop")].backend.service.name}{" "}{.spec.rules[0].http.paths[?(@.path=="/shop")].backend.service.port.number}''''
-equals = "Prefix web 80"
+name = "shop.dojo.test/shop and /shop/cart reach web"
+run = '''r() { kubectl -n dojo-ingress exec deploy/probe -- curl -sS --max-time 3 -H "Host: $1" "http://traefik.dojo-ingress$2" 2>&1; }
+for i in $(seq 1 20); do a=$(r shop.dojo.test /shop); b=$(r shop.dojo.test /shop/cart); [ "$a|$b" = "web /shop|web /shop/cart" ] && echo ok && exit 0; sleep 2; done; echo "/shop -> $a; /shop/cart -> $b"'''
+equals = "ok"
+timeout = 90
+
+[[lab.steps.checks]]
+name = "/shopping and other hosts do not reach web"
+run = '''r() { kubectl -n dojo-ingress exec deploy/probe -- curl -sS --max-time 3 -H "Host: $1" "http://traefik.dojo-ingress$2" 2>&1; }
+[ "$(r shop.dojo.test /shop)" = "web /shop" ] || { echo "the route does not work yet"; exit 1; }
+a=$(r shop.dojo.test /shopping); b=$(r other.dojo.test /shop)
+case "$a$b" in *web*) echo "/shopping -> $a; other.dojo.test/shop -> $b" ;; *) echo ok ;; esac'''
+equals = "ok"
+timeout = 60
+
+[[lab.steps.negatives]]
+name = "uses Exact instead of Prefix"
+run = '''kubectl -n ingress-lab create ingress shop --class=dojo-traefik --rule="shop.dojo.test/shop=web:80" --dry-run=client -o yaml | kubectl apply -f -
+sleep 3'''
+
+[[lab.steps.negatives]]
+name = "leaves out the host, so every host reaches web"
+run = '''kubectl -n ingress-lab delete ingress shop --ignore-not-found
+kubectl -n ingress-lab create ingress shop --class=dojo-traefik --rule="/shop*=web:80"
+sleep 3'''
+undo = '''kubectl -n ingress-lab delete ingress shop --ignore-not-found'''
+
+[[lab.steps.alternatives]]
+name = "declares the same route in YAML with the named Service port"
+run = '''kubectl -n ingress-lab delete ingress shop --ignore-not-found
+kubectl apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shop
+  namespace: ingress-lab
+spec:
+  ingressClassName: dojo-traefik
+  rules:
+  - host: shop.dojo.test
+    http:
+      paths:
+      - path: /shop
+        pathType: Prefix
+        backend:
+          service:
+            name: web
+            port: {name: http}
+EOF
+sleep 3'''
+undo = '''kubectl -n ingress-lab delete ingress shop --ignore-not-found'''
 
 [[lab.steps]]
 title = "Add an exact path and a fallback"
-task = "Keep the /shop Prefix route. Add Exact path /health on the same host to web:80. Configure spec.defaultBackend as Service fallback port 80."
+task = "Keep the /shop Prefix route. On the same host add Exact path /health to Service status port 80: /health must reach status, /health/deep must not. Also configure spec.defaultBackend as Service fallback port 80 (Traefik, like several controllers, only uses defaultBackend from an Ingress without rules, so here it is graded on the spec)."
 solution = '''```bash
 kubectl apply -f - <<'EOF'
 apiVersion: networking.k8s.io/v1
@@ -110,25 +257,82 @@ spec:
         pathType: Exact
         backend:
           service:
-            name: web
+            name: status
             port: {number: 80}
 EOF
+sleep 3
+kubectl -n dojo-ingress exec deploy/probe -- curl -s -H 'Host: shop.dojo.test' http://traefik.dojo-ingress/health
+kubectl -n dojo-ingress exec deploy/probe -- curl -s -H 'Host: shop.dojo.test' http://traefik.dojo-ingress/health/deep
 ```'''
-hints = ["defaultBackend belongs directly under spec, alongside rules.", "The backend uses networking.k8s.io/v1 nested service.name and service.port fields."]
+hints = ["defaultBackend belongs directly under spec, alongside rules.", "Exact /health matches only /health; /health/deep matches no rule."]
 
 [[lab.steps.checks]]
-name = "health is an Exact route to web"
-run = '''kubectl -n ingress-lab get ingress shop -o jsonpath='{.spec.rules[0].http.paths[?(@.path=="/health")].pathType}{" "}{.spec.rules[0].http.paths[?(@.path=="/health")].backend.service.name}{" "}{.spec.rules[0].http.paths[?(@.path=="/health")].backend.service.port.number}''''
-equals = "Exact web 80"
+name = "/health reaches status and /shop/cart still reaches web"
+run = '''r() { kubectl -n dojo-ingress exec deploy/probe -- curl -sS --max-time 3 -H "Host: $1" "http://traefik.dojo-ingress$2" 2>&1; }
+for i in $(seq 1 20); do a=$(r shop.dojo.test /health); b=$(r shop.dojo.test /shop/cart); [ "$a|$b" = "status /health|web /shop/cart" ] && echo ok && exit 0; sleep 2; done; echo "/health -> $a; /shop/cart -> $b"'''
+equals = "ok"
+timeout = 90
+
+[[lab.steps.checks]]
+name = "/health/deep and other hosts reach neither status nor web"
+run = '''r() { kubectl -n dojo-ingress exec deploy/probe -- curl -sS --max-time 3 -H "Host: $1" "http://traefik.dojo-ingress$2" 2>&1; }
+[ "$(r shop.dojo.test /health)" = "status /health" ] || { echo "/health is not routed to status yet"; exit 1; }
+a=$(r shop.dojo.test /health/deep); b=$(r other.dojo.test /health)
+case "$a$b" in *status*|*web*) echo "/health/deep -> $a; other.dojo.test/health -> $b" ;; *) echo ok ;; esac'''
+equals = "ok"
+timeout = 60
 
 [[lab.steps.checks]]
 name = "unmatched requests have a default backend"
-run = '''kubectl -n ingress-lab get ingress shop -o jsonpath='{.spec.defaultBackend.service.name}{" "}{.spec.defaultBackend.service.port.number}''''
+run = '''kubectl -n ingress-lab get ingress shop -o jsonpath='{.spec.defaultBackend.service.name}{" "}{.spec.defaultBackend.service.port.number}{.spec.defaultBackend.service.port.name}''''
 equals = "fallback 80"
 
+[[lab.steps.negatives]]
+name = "uses Prefix for /health"
+run = '''kubectl apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shop
+  namespace: ingress-lab
+spec:
+  ingressClassName: dojo-traefik
+  defaultBackend:
+    service:
+      name: fallback
+      port: {number: 80}
+  rules:
+  - host: shop.dojo.test
+    http:
+      paths:
+      - {path: /shop, pathType: Prefix, backend: {service: {name: web, port: {number: 80}}}}
+      - {path: /health, pathType: Prefix, backend: {service: {name: status, port: {number: 80}}}}
+EOF
+sleep 3'''
+
+[[lab.steps.negatives]]
+name = "adds a / catch-all under the host instead of a default backend"
+run = '''kubectl apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shop
+  namespace: ingress-lab
+spec:
+  ingressClassName: dojo-traefik
+  rules:
+  - host: shop.dojo.test
+    http:
+      paths:
+      - {path: /shop, pathType: Prefix, backend: {service: {name: web, port: {number: 80}}}}
+      - {path: /health, pathType: Exact, backend: {service: {name: status, port: {number: 80}}}}
+      - {path: /, pathType: Prefix, backend: {service: {name: fallback, port: {number: 80}}}}
+EOF
+sleep 3'''
+
 [[lab.steps]]
-title = "Describe TLS termination"
-task = "Create TLS Secret shop-tls in ingress-lab from a locally generated self-signed certificate for shop.dojo.test. Add a TLS entry to shop using that host and Secret. Preserve both paths and the default backend. This step requires the openssl CLI on the lab terminal host."
+title = "Terminate TLS"
+task = "Create TLS Secret shop-tls in ingress-lab from a locally generated self-signed certificate for shop.dojo.test. Add a TLS entry to shop using that host and Secret, preserving both paths and the default backend. HTTPS requests for shop.dojo.test must then present your certificate: `kubectl -n dojo-ingress exec -i deploy/probe -- sh -c 'cat > /tmp/ca.pem && curl -s --cacert /tmp/ca.pem --connect-to shop.dojo.test:443:traefik.dojo-ingress:443 https://shop.dojo.test/shop' < shop.crt` answers `web /shop`. This step requires the openssl CLI on the lab terminal host."
 solution = '''```bash
 cat > shop.cnf <<'EOF'
 [req]
@@ -171,21 +375,52 @@ spec:
         pathType: Exact
         backend:
           service:
-            name: web
+            name: status
             port: {number: 80}
 EOF
+sleep 3
+kubectl -n dojo-ingress exec -i deploy/probe -- sh -c 'cat > /tmp/ca.pem && curl -s --cacert /tmp/ca.pem --connect-to shop.dojo.test:443:traefik.dojo-ingress:443 https://shop.dojo.test/shop' < shop.crt
 ```'''
-hints = ["kubectl create secret tls reads PEM files and creates kubernetes.io/tls data keys.", "The certificate is a throwaway lab certificate; no external certificate authority or controller is needed."]
+hints = ["kubectl create secret tls reads PEM files and creates kubernetes.io/tls data keys.", "Without a matching tls entry the controller serves its own default certificate, which your CA file will not trust."]
 
 [[lab.steps.checks]]
-name = "TLS references the requested host and Secret"
-run = '''kubectl -n ingress-lab get ingress shop -o jsonpath='{.spec.tls[0].hosts[0]}{" "}{.spec.tls[0].secretName}''''
-equals = "shop.dojo.test shop-tls"
+name = "shop-tls is a kubernetes.io/tls Secret"
+run = '''kubectl -n ingress-lab get secret shop-tls -o jsonpath='{.type}''''
+equals = "kubernetes.io/tls"
 
 [[lab.steps.checks]]
-name = "the referenced TLS Secret has both required entries"
-run = '''t=$(kubectl -n ingress-lab get secret shop-tls -o jsonpath='{.type}'); c=$(kubectl -n ingress-lab get secret shop-tls -o jsonpath='{.data.tls\.crt}'); k=$(kubectl -n ingress-lab get secret shop-tls -o jsonpath='{.data.tls\.key}'); [ "$t" = kubernetes.io/tls ] && [ -n "$c" ] && [ -n "$k" ] && echo ok'''
+name = "HTTPS for shop.dojo.test presents the shop-tls certificate and routes /shop"
+run = '''kubectl -n ingress-lab get secret shop-tls >/dev/null 2>&1 || { echo "no Secret shop-tls"; exit 1; }
+for i in $(seq 1 20); do
+  v=$(kubectl -n ingress-lab get secret shop-tls -o go-template='{{index .data "tls.crt" | base64decode}}' | kubectl -n dojo-ingress exec -i deploy/probe -- sh -c 'cat > /tmp/ca.pem && curl -sS --max-time 3 --cacert /tmp/ca.pem --connect-to shop.dojo.test:443:traefik.dojo-ingress:443 https://shop.dojo.test/shop/tls' 2>&1)
+  [ "$v" = "web /shop/tls" ] && echo ok && exit 0; sleep 2
+done; echo "$v"'''
 equals = "ok"
+timeout = 90
+
+[[lab.steps.checks]]
+name = "plain HTTP routing still works"
+run = '''kubectl -n dojo-ingress exec deploy/probe -- curl -sS --max-time 3 -H "Host: shop.dojo.test" http://traefik.dojo-ingress/health 2>&1'''
+equals = "status /health"
+
+[[lab.steps.negatives]]
+name = "creates the Secret but never references it from the Ingress"
+run = '''openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout shop.key -out shop.crt -subj /CN=shop.dojo.test -addext subjectAltName=DNS:shop.dojo.test 2>/dev/null
+kubectl -n ingress-lab create secret tls shop-tls --cert=shop.crt --key=shop.key --dry-run=client -o yaml | kubectl apply -f -
+sleep 3'''
+undo = '''kubectl -n ingress-lab delete secret shop-tls --ignore-not-found
+rm -f shop.key shop.crt'''
+
+[[lab.steps.negatives]]
+name = "references a certificate issued for another host name"
+run = '''mkdir -p wrong
+openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout wrong/tls.key -out wrong/tls.crt -subj /CN=www.dojo.test -addext subjectAltName=DNS:www.dojo.test 2>/dev/null
+kubectl -n ingress-lab create secret tls shop-tls --cert=wrong/tls.crt --key=wrong/tls.key --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n ingress-lab patch ingress shop --type=merge -p '{"spec":{"tls":[{"hosts":["shop.dojo.test"],"secretName":"shop-tls"}]}}'
+sleep 3'''
+undo = '''kubectl -n ingress-lab patch ingress shop --type=json -p '[{"op":"remove","path":"/spec/tls"}]'
+kubectl -n ingress-lab delete secret shop-tls --ignore-not-found
+rm -rf wrong'''
 +++
 
 ## A routing declaration and the process that implements it
@@ -198,7 +433,7 @@ browser -> controller listener -> host/path rule -> Service port -> Pod
                          +-> TLS certificate from a Secret
 ```
 
-The resource is configuration. The **Ingress controller** is software that watches the API and configures listeners and routes. Creating an Ingress without a compatible controller stores an object but does not create a working proxy. PodDojo deliberately has no controller installed, so this lab grades the desired specification rather than external reachability.
+The resource is configuration. The **Ingress controller** is software that watches the API and configures listeners and routes. Creating an Ingress without a compatible controller stores an object but does not create a working proxy. This lab installs one for you: Traefik, in namespace `dojo-ingress`, serving every IngressClass whose controller is `traefik.io/ingress-controller` (a ready-made class `traefik` exists). The lab grades real requests, so a rule that looks right but routes wrongly does not pass.
 
 An IngressClass connects a resource to a controller implementation. Its `spec.controller` contains an implementation identifier. An Ingress uses `spec.ingressClassName` to reference the class by name. A default IngressClass may handle resources without that field, but relying on a default hides an important dependency. Read the task's class requirement and set it explicitly.
 
@@ -243,6 +478,17 @@ Prefix is not arbitrary character-prefix matching, and Exact is not a regular ex
 
 A wildcard host such as `*.dojo.test` matches a single DNS label, for example `shop.dojo.test`, not the bare `dojo.test` or `a.shop.dojo.test`. An omitted host permits matching without a specific virtual host. These distinctions become important when troubleshooting a request that reaches a controller but is routed to an unexpected application.
 
+## Test through the controller
+
+A route is only proven by a request. Inside the lab cluster the controller answers on `traefik.dojo-ingress` (HTTP on 80, HTTPS on 443), and Deployment `probe` in `dojo-ingress` is a curl client you can exec into. The Host header selects the rule, so you do not need DNS:
+
+```bash
+kubectl -n dojo-ingress exec deploy/probe -- curl -s -H 'Host: shop.dojo.test' http://traefik.dojo-ingress/shop/cart
+kubectl -n dojo-ingress exec deploy/probe -- curl -s -H 'Host: other.dojo.test' http://traefik.dojo-ingress/shop
+```
+
+The lab's backends answer with their own name and the path they received (`web /shop/cart`), so you can see which rule matched. HTTPS is also published on your machine: `curl -sk -H 'Host: shop.dojo.test' https://$PODDOJO_HOST:30443/shop`. On the exam, the equivalent is a `curl` from the exam terminal or a temporary Pod (`kubectl run tmp --rm -it --image=curlimages/curl:8.13.0 --restart=Never -- curl ...`).
+
 ## Generate, inspect, apply
 
 ```bash
@@ -269,7 +515,7 @@ spec:
         number: 80
 ```
 
-A default backend Service still needs working endpoints. A route can be syntactically correct while the backend is unavailable. Follow failures through class selection, host, path, Service port, endpoint readiness and finally the application's response. Do not treat an empty ADDRESS column as proof that a rule is malformed; reporting depends on the controller and environment.
+Support for `defaultBackend` varies by controller. Traefik, for example, only uses it from an Ingress that has no rules, as the controller's cluster-wide fallback, and answers its own 404 otherwise; that is why the lab grades this field on the spec. A default backend Service still needs working endpoints. A route can be syntactically correct while the backend is unavailable. Follow failures through class selection, host, path, Service port, endpoint readiness and finally the application's response. Do not treat an empty ADDRESS column as proof that a rule is malformed; reporting depends on the controller and environment.
 
 ## TLS configuration has two sides
 
@@ -283,7 +529,7 @@ spec:
     secretName: shop-tls
 ```
 
-A reference does not issue or renew a certificate. Controllers often terminate HTTPS and send HTTP to backends; encrypting the backend hop requires separate controller-specific configuration. Likewise, redirects from HTTP to HTTPS are not standardized by the TLS stanza alone. The lab uses a self-signed certificate to practice object wiring, not to establish browser trust. Never put a real private key into source control or display Secret data while debugging.
+A reference does not issue or renew a certificate. Controllers often terminate HTTPS and send HTTP to backends; encrypting the backend hop requires separate controller-specific configuration. Likewise, redirects from HTTP to HTTPS are not standardized by the TLS stanza alone. The lab uses a self-signed certificate and verifies it with `curl --cacert shop.crt`: if the Ingress does not reference the Secret, or the certificate names another host, the controller presents its own default certificate and verification fails. Self-signed certificates practice the wiring; they do not establish browser trust. Never put a real private key into source control or display Secret data while debugging.
 
 ## Controllers and the path toward Gateway API
 
@@ -293,4 +539,4 @@ Gateway API is the successor direction for richer, role-oriented traffic managem
 
 ## Exam tips
 
-Use the required class, namespace, hostname, pathType and Service port exactly. Inspect stored spec after applying and test traffic only when a controller is actually available. Avoid copying rewrite annotations from an unrelated controller. The [kubectl generator reference](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_create/kubectl_create_ingress/) is useful when reconstructing imperative syntax under time pressure.
+Use the required class, namespace, hostname, pathType and Service port exactly. Inspect the stored spec after applying, then send a request with the expected Host header to prove the route. Avoid copying rewrite annotations from an unrelated controller. The [kubectl generator reference](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_create/kubectl_create_ingress/) is useful when reconstructing imperative syntax under time pressure.

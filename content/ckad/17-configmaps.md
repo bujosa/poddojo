@@ -15,7 +15,7 @@ objectives = [
 
 [[quiz]]
 q = "A ConfigMap used by envFrom changes. What happens to an already running container?"
-choices = ["Its environment changes immediately", "It restarts automatically", "Its environment remains a startup snapshot", "The API rejects the update"]
+choices = ["Its environment changes immediately", "It restarts automatically", "Its environment remains a startup snapshot", "It updates after the kubelet sync period, like a volume"]
 answer = 2
 why = "The kubelet constructs the environment when starting a container. Updating a ConfigMap does not rewrite an existing process environment or change a Deployment template. Recreate the Pod, usually through a rollout, to consume the new values."
 
@@ -27,13 +27,13 @@ why = "A subPath mount binds the selected file rather than following the project
 
 [[quiz]]
 q = "What does --from-file=settings=app.conf create?"
-choices = ["A key app.conf containing settings", "A key settings containing the file's contents", "One key for every line", "An environment variable named app.conf"]
+choices = ["A key app.conf containing settings", "A key settings containing the file's contents", "A key settings containing the path app.conf", "Keys parsed from the key=value lines in app.conf"]
 answer = 1
 why = "The optional name before the equals sign chooses the ConfigMap key. File creation stores the whole file as one value; --from-env-file instead parses separate KEY=value entries."
 
 [[quiz]]
 q = "What is a sensible way to change an immutable ConfigMap used by a Deployment?"
-choices = ["Set immutable back to false", "Patch data with --force", "Create a new named ConfigMap and update the Pod template reference", "Wait for the kubelet cache to expire"]
+choices = ["Set immutable back to false", "Patch data with --force", "Create a new named ConfigMap and update the Pod template reference", "Use kubectl edit, which bypasses the immutable flag"]
 answer = 2
 why = "Immutability cannot be reversed, and data cannot be changed on that object. A new versioned object plus a template change gives the Deployment an explicit rollout and leaves the old configuration available for rollback."
 

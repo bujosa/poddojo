@@ -8,31 +8,31 @@ objectives = ["Trace a Docker request from the client to the container process",
 
 [[quiz]]
 q = "Which machine starts the process when your selected context uses SSH?"
-choices = ["The laptop running the Docker CLI", "The remote machine running the selected daemon", "Docker Hub", "Both machines run identical copies"]
+choices = ["The laptop running the Docker CLI", "The remote machine running the selected daemon", "The registry the image is pulled from", "The laptop, which forwards only published ports over SSH"]
 answer = 1
 why = "The client sends API requests over SSH. The daemon on the remote machine creates the container there; the local CLI only presents its output."
 
 [[quiz]]
 q = "Why can docker version show a working Client section but no Server section?"
-choices = ["Containers need rebuilding", "The registry password has expired", "The CLI is installed but cannot reach the selected daemon", "An image has no CMD"]
+choices = ["The daemon is running but no images have been pulled yet", "You are logged out of the registry, so the daemon hides its details", "The CLI is installed but cannot reach the selected daemon", "The daemon runs rootless, which hides the Server section"]
 answer = 2
 why = "Client information is local. Server information requires an API connection, so check the context endpoint, SSH access and daemon availability before debugging images."
 
 [[quiz]]
 q = "What does access to a conventional rootful Docker API socket imply?"
-choices = ["Powerful control over the host through the daemon", "Permission only to list containers", "An encrypted network connection", "Automatic isolation from host files"]
+choices = ["Powerful control over the host through the daemon", "Permission to manage containers, but not to mount host directories", "Control limited to the containers your own user started", "Root-level access only when the daemon also listens on TCP"]
 answer = 0
 why = "A caller can ask the rootful daemon to create privileged containers and mount host paths. Treat socket access like host administrator access; do not expose an unauthenticated API."
 
 [[quiz]]
 q = "What is docker.io/library/alpine:3.20?"
-choices = ["A container ID", "A local filesystem path", "An SSH context", "A registry, repository and tag identifying an image reference"]
+choices = ["A digest reference that pins the exact image bytes", "An image on a self-hosted registry named library", "The name of a container created by `docker run alpine`", "A registry, repository and tag identifying an image reference"]
 answer = 3
 why = "docker.io is the registry; library/alpine is the repository; 3.20 is a tag. Pulling an image downloads content, whereas a context selects the daemon that stores and runs it."
 
 [[quiz]]
 q = "Which setting does PodDojo supply to select your Docker machine?"
-choices = ["A change to your shell startup file", "DOCKER_CONTEXT in each lab command environment", "A new default Kubernetes namespace", "A Docker Hub organization"]
+choices = ["`docker context use`, switching your global default context", "DOCKER_CONTEXT in each lab command environment", "DOCKER_HOST written into your shell startup file", "A `--context` flag added to every docker command"]
 answer = 1
 why = "DOCKER_CONTEXT selects a named Docker context for those commands. PodDojo does not need to change your saved default context, and a Docker context is separate from a Kubernetes context."
 

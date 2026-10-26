@@ -13,7 +13,9 @@ mod embedded {
 }
 
 pub use check::{Check, CheckResult, CommandOutput};
-pub use content::{Catalog, ContentError, Exam, ExamTask, Lab, LabStep, Lesson, Module, Needs, QuizQuestion, Track};
+pub use content::{
+    Case, Catalog, ContentError, Exam, ExamTask, Lab, LabStep, Lesson, Module, Needs, QuizQuestion, Requirement, Track,
+};
 pub use domains::{CKAD_CURRICULUM_VERSION, DOMAINS, Domain};
 pub use exam::{DomainScore, ExamAttempt, TaskResult};
 pub use progress::{ActiveExam, LessonProgress, LessonStatus, Progress, QuizScore, Readiness};

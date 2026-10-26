@@ -349,6 +349,7 @@ mod tests {
             minutes: 10,
             domain: Some("deployment".into()),
             needs: Needs::Docker,
+            requires: vec![],
             objectives: vec![],
             body: String::new(),
             quiz: if quiz {
@@ -364,6 +365,8 @@ mod tests {
                         hints: vec![],
                         solution: String::new(),
                         checks: vec![Check::default()],
+                        negatives: vec![],
+                        alternatives: vec![],
                     })
                     .collect(),
                 ..Default::default()

@@ -9,31 +9,31 @@ domain = "design-build"
 
 [[quiz]]
 q = "What does a new FROM instruction do?"
-choices = ["Adds the previous stage to the final image automatically", "Starts a new build stage with its own base and configuration", "Deletes the build context", "Starts a container in Kubernetes"]
+choices = ["Adds the previous stage to the final image automatically", "Starts a new build stage with its own base and configuration", "Continues the previous stage on a different base image", "Starts a separate build that cannot copy from earlier stages"]
 answer = 1
 why = "A stage begins from its specified base. Only deliberately copied artifacts or an explicitly inherited stage carry earlier filesystem content into it."
 
 [[quiz]]
 q = "What should COPY --from=build usually transfer?"
-choices = ["The entire compiler installation", "The Docker socket", "Every cached layer", "Only the runtime artifacts and required supporting files"]
+choices = ["The entire compiler installation", "The whole stage filesystem, so nothing is missing at runtime", "The source code, so the runtime image can rebuild itself", "Only the runtime artifacts and required supporting files"]
 answer = 3
 why = "The separation works because the final image receives only what execution needs. Copying an entire build filesystem defeats the size and attack-surface benefit."
 
 [[quiz]]
 q = "Why can a binary copied into scratch fail to start even though the file exists?"
-choices = ["The binary may require a missing dynamic loader or shared libraries", "scratch always requires a shell", "scratch is an ARM-only image", "COPY cannot preserve executable files"]
+choices = ["The binary may require a missing dynamic loader or shared libraries", "scratch always requires a shell", "scratch has no /tmp, which every binary needs to start", "COPY --from drops the executable bit unless you add --chmod"]
 answer = 0
 why = "An empty image has no loader, libraries, CA bundle, timezone data or shell unless supplied. A genuinely static binary still needs any non-binary runtime data its behavior depends on."
 
 [[quiz]]
 q = "What does an unhealthy Docker HEALTHCHECK status do by itself?"
-choices = ["Deletes the container", "Restarts the container under every restart policy", "Reports failed health observations without automatically restarting the process", "Makes Kubernetes create a readiness probe"]
+choices = ["Stops the container so its restart policy starts it again", "Restarts the container under every restart policy", "Reports failed health observations without automatically restarting the process", "Makes Kubernetes create a readiness probe"]
 answer = 2
 why = "The Engine records health status. A separate orchestrator would need to act on it; Kubernetes does not derive its readiness or liveness probes from a Dockerfile HEALTHCHECK."
 
 [[quiz]]
 q = "Which image is necessarily the best production choice?"
-choices = ["Whichever has the fewest bytes", "A base with exactly the needed runtime compatibility, security maintenance and operational support", "Whichever includes every compiler", "Always scratch regardless of application"]
+choices = ["Whichever has the fewest bytes", "A base with exactly the needed runtime compatibility, security maintenance and operational support", "Whichever official image has the most recent tag", "Always a distroless image, regardless of the application"]
 answer = 1
 why = "Size matters, but an image must still run correctly, receive updates and support an operational strategy. libc compatibility, certificates, user IDs and debugging needs all influence the choice."
 

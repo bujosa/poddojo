@@ -9,31 +9,31 @@ objectives = ["Locate the first failing stage from scheduling through Service ro
 
 [[quiz]]
 q = "A Pod is Pending with no assigned node. Where do you start?"
-choices = ["Application HTTP logs", "Scheduling events, resource requests, node constraints, and PVC status", "Delete the Service", "Change the liveness path"]
+choices = ["Application HTTP logs", "Scheduling events, resource requests, node constraints, and PVC status", "Logs from the previous container instance", "The Service's EndpointSlices"]
 answer = 1
 why = "A container cannot produce useful application logs before it starts. Scheduling evidence identifies whether resources, selectors, taints, or storage placement prevent a node assignment."
 
 [[quiz]]
 q = "What does CreateContainerConfigError with a missing ConfigMap key imply?"
-choices = ["The application process rejected the key", "The container could not be configured before startup", "The Service has the wrong port", "The node kernel panicked"]
+choices = ["The application process rejected the key", "The container could not be configured before startup", "The image could not be pulled", "The container started, then crashed"]
 answer = 1
 why = "Kubelet resolves required ConfigMap and Secret references before creating the container. Fix the referenced object/key or the Pod template reference, then allow retry."
 
 [[quiz]]
 q = "Why is deleting a managed crashing Pod rarely a complete fix?"
-choices = ["Pods cannot be deleted", "Its controller creates another Pod from the same broken template", "Deletion changes its image", "Logs are automatically repaired"]
+choices = ["The deleted Pod is restarted on the same node", "Its controller creates another Pod from the same broken template", "Deletion resets the Deployment to its previous revision", "The kubelet blocks deletion while restarts continue"]
 answer = 1
 why = "Repair the owning Deployment or its required dependency. Recreating the same template usually reproduces the failure and can discard useful diagnostic evidence."
 
 [[quiz]]
 q = "What distinguishes OOMKilled from a generic nonzero exit?"
-choices = ["Only the displayed Pod phase", "The last terminated container reason and memory context", "A Service annotation", "The Deployment name"]
+choices = ["Only the displayed Pod phase", "The last terminated container reason and memory context", "Exit code 1 in the container status", "A Warning event with reason BackOff"]
 answer = 1
 why = "Inspect lastState.terminated.reason and limits/events. Exit code 137 indicates SIGKILL but is not alone proof of an out-of-memory kill."
 
 [[quiz]]
 q = "What can an ephemeral container help with?"
-choices = ["Repairing the Deployment template automatically", "Adding diagnostic tools to a running Pod without replacing its application image", "Changing every volume mount", "Providing a guaranteed permanent sidecar"]
+choices = ["Repairing the Deployment template automatically", "Adding diagnostic tools to a running Pod without replacing its application image", "Changing the container's resource limits in place", "Adding a restartable sidecar that survives Pod restarts"]
 answer = 1
 why = "Ephemeral containers share the Pod network and can target a container process namespace when supported. They are diagnostic additions, not ordinary restartable application containers."
 

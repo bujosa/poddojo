@@ -15,7 +15,7 @@ objectives = [
 
 [[quiz]]
 q = "A valid ServiceAccount token identifies the caller, but the caller cannot list Pods. Which stage answers whether listing is permitted?"
-choices = ["Authentication", "Authorization", "Scheduling", "Container image verification"]
+choices = ["Authentication", "Authorization", "Admission", "Audit logging"]
 answer = 1
 why = "Authentication establishes identity; authorization evaluates that identity's requested action. Admission can then default, mutate or reject eligible write requests based on object policy. Having a token alone grants no general workload permissions."
 
@@ -27,19 +27,19 @@ why = "A RoleBinding limits the grant to its own namespace even when it referenc
 
 [[quiz]]
 q = "Which apiGroups value selects core resources such as Pods and ConfigMaps?"
-choices = ["v1", "core/v1", "An empty string", "kubernetes.io"]
+choices = ["v1", "core/v1", "An empty string", "`core`"]
 answer = 2
 why = "RBAC uses API groups, not apiVersion strings. Core resources use apiGroups: [\"\"], Deployments use apps, and Jobs use batch. Resource names are normally lowercase plurals."
 
 [[quiz]]
 q = "What does automountServiceAccountToken: false on a Pod do?"
-choices = ["Deletes its ServiceAccount", "Removes all RBAC grants", "Disables automatic API token projection for that Pod", "Prevents explicit projected token volumes"]
+choices = ["Revokes the ServiceAccount's existing tokens", "Runs the Pod with no ServiceAccount at all", "Disables automatic API token projection for that Pod", "Prevents explicit projected token volumes"]
 answer = 2
 why = "The Pod still has its assigned identity and any RBAC grants, but automatic credential injection is disabled. You can explicitly project a token if needed. A Pod-level setting overrides the ServiceAccount's default setting."
 
 [[quiz]]
 q = "kubectl auth can-i create pods returns yes, but a privileged Pod is rejected in a restricted namespace. Why?"
-choices = ["Authorization is broken", "Admission can reject object content even when the action is authorized", "Restricted namespaces have no API", "ServiceAccounts cannot create Pods"]
+choices = ["Authorization is broken", "Admission can reject object content even when the action is authorized", "can-i ignores the namespace you pass", "The scheduler rejects privileged Pods on restricted nodes"]
 answer = 1
 why = "can-i evaluates authorization, not every admission rule. Pod Security Admission can reject the Pod's security settings, just as quota admission can reject missing resources. A successful permission test does not promise every object will be accepted."
 

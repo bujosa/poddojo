@@ -9,44 +9,45 @@ objectives = ["Compose reusable bases and environment overlays", "Transform name
 
 [[quiz]]
 q = "What does kubectl apply -k overlays/dev do?"
-choices = ["Sends kustomization.yaml as a Kubernetes resource", "Builds the overlay then applies the rendered resources", "Installs a Helm release", "Disables validation"]
+choices = ["Sends kustomization.yaml as a Kubernetes resource", "Builds the overlay then applies the rendered resources", "Applies only the patches, leaving base resources untouched", "Applies the base, then the overlay as a second request"]
 answer = 1
 why = "Kustomization is build input. kubectl builds its resources, transformations, patches, and generators into ordinary API objects before applying them."
 
 [[quiz]]
 q = "Why do configMapGenerator names normally include a hash suffix?"
-choices = ["To encrypt the ConfigMap", "To change its name when generated content changes", "To make it cluster-scoped", "To prevent Pods reading it"]
+choices = ["To avoid name clashes with ConfigMaps in other namespaces", "To change its name when generated content changes", "To mark the ConfigMap immutable", "To let kubectl prune old ConfigMaps automatically"]
 answer = 1
 why = "A content change creates a new generated name. Kustomize rewrites recognized references, changing the Pod template so a Deployment can roll out the new configuration."
 
 [[quiz]]
 q = "What identifies a container entry for a strategic merge patch?"
-choices = ["Always its numeric list position", "Its name merge key for built-in Pod container lists", "Its image registry", "Its current Pod IP"]
+choices = ["Always its numeric list position", "Its name merge key for built-in Pod container lists", "Its image field", "Its first containerPort"]
 answer = 1
 why = "For supported built-in schemas, strategic merge knows merge keys such as containers.name. JSON 6902 instead uses explicit document paths, where a list index can be fragile."
 
 [[quiz]]
 q = "Why can commonLabels be hazardous on an existing Deployment?"
-choices = ["It encrypts labels", "It can change selectors that are immutable", "It disables Service discovery", "It removes all resources"]
+choices = ["It applies only to metadata, never to Pod templates", "It can change selectors that are immutable", "It removes labels that the overlay does not list", "It only works inside a Kustomize component"]
 answer = 1
 why = "commonLabels propagates into selectors as well as metadata. Prefer labels with deliberate includeSelectors/includeTemplates settings, and plan selector changes before first creation."
 
 [[quiz]]
 q = "Does apply -k automatically delete older hashed ConfigMaps?"
-choices = ["Yes, every old generator result", "Only when a Secret changes", "No; apply does not by itself garbage-collect old generated objects", "Yes, after five minutes"]
+choices = ["Yes, every old generator result", "Yes, when the generator sets behavior: replace", "No; apply does not by itself garbage-collect old generated objects", "Yes; unreferenced ConfigMaps are garbage-collected"]
 answer = 2
-why = "Applying a new hash creates or updates current objects but normally leaves old generator outputs. Use a deliberate cleanup policy; this lab removes its entire isolated namespace."
+why = "Applying a new hash creates or updates current objects but normally leaves old generator outputs. Use a deliberate cleanup policy; this lab removes its isolated namespaces."
 
 [lab]
 summary = "Build development and production overlays from supplied files, apply both, and trigger a configuration rollout through generated-name changes."
 setup = [
 '''
-kubectl create namespace kustomize-lab --dry-run=client -o yaml | kubectl apply -f -
+kubectl create namespace kustomize-dev --dry-run=client -o yaml | kubectl apply -f -
+kubectl create namespace kustomize-prod --dry-run=client -o yaml | kubectl apply -f -
 '''
 ]
 cleanup = [
 '''
-kubectl delete namespace kustomize-lab --ignore-not-found --wait=false || true
+kubectl delete namespace kustomize-dev kustomize-prod --ignore-not-found --wait=false || true
 '''
 ]
 
@@ -108,7 +109,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
 - ../../base
-namespace: kustomize-lab
+namespace: kustomize-dev
 namePrefix: dev-
 '''
 "overlays/prod/kustomization.yaml" = '''
@@ -116,7 +117,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
 - ../../base
-namespace: kustomize-lab
+namespace: kustomize-prod
 namePrefix: prod-
 nameSuffix: -v1
 '''
@@ -124,7 +125,7 @@ nameSuffix: -v1
 [[lab.steps]]
 title = "Customize and apply development"
 task = '''
-Update overlays/dev/kustomization.yaml to add environment=dev to resource metadata and Pod templates without changing selectors, and transform nginx to 1.27-alpine. Preserve namespace kustomize-lab and prefix dev-. Render with kubectl kustomize, then apply -k. Wait for dev-dojo-web to become available.
+Update overlays/dev/kustomization.yaml to add environment=dev to resource metadata and Pod templates without changing selectors, and transform nginx to 1.27-alpine. Preserve namespace kustomize-dev and prefix dev-. Render with kubectl kustomize, then apply -k. Wait for dev-dojo-web to become available.
 '''
 hints = ["Use labels with includeTemplates true and includeSelectors false.", "The images transformer matches the image name, not the container name."]
 solution = '''
@@ -134,7 +135,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
 - ../../base
-namespace: kustomize-lab
+namespace: kustomize-dev
 namePrefix: dev-
 labels:
 - pairs:
@@ -147,16 +148,16 @@ images:
 EOF
 kubectl kustomize overlays/dev
 kubectl apply -k overlays/dev
-kubectl -n kustomize-lab rollout status deployment/dev-dojo-web --timeout=120s
+kubectl -n kustomize-dev rollout status deployment/dev-dojo-web --timeout=120s
 ```
 '''
 
 [[lab.steps.checks]]
 name = "development transformation is live"
 run = '''
-kubectl -n kustomize-lab get deployment/dev-dojo-web -o name >/dev/null 2>&1 || exit 1
+kubectl -n kustomize-dev get deployment/dev-dojo-web -o name >/dev/null 2>&1 || exit 1
 for i in $(seq 1 45); do
-  if [ "$(kubectl -n kustomize-lab get deployment/dev-dojo-web -o jsonpath='{.spec.template.spec.containers[0].image} {.metadata.labels.environment} {.spec.template.metadata.labels.environment}')" = "nginx:1.27-alpine dev dev" ] && [ "$(kubectl -n kustomize-lab get deployment/dev-dojo-web -o jsonpath='{.status.observedGeneration} {.status.updatedReplicas} {.status.readyReplicas} {.status.availableReplicas} {.status.replicas}')" = "$(kubectl -n kustomize-lab get deployment/dev-dojo-web -o jsonpath='{.metadata.generation}') 1 1 1 1" ]; then echo ok; exit 0; fi
+  if [ "$(kubectl -n kustomize-dev get deployment/dev-dojo-web -o jsonpath='{.spec.template.spec.containers[0].image} {.metadata.labels.environment} {.spec.template.metadata.labels.environment}')" = "nginx:1.27-alpine dev dev" ] && [ "$(kubectl -n kustomize-dev get deployment/dev-dojo-web -o jsonpath='{.status.observedGeneration} {.status.updatedReplicas} {.status.readyReplicas} {.status.availableReplicas} {.status.replicas}')" = "$(kubectl -n kustomize-dev get deployment/dev-dojo-web -o jsonpath='{.metadata.generation}') 1 1 1 1" ]; then echo ok; exit 0; fi
   sleep 2
 done
 exit 1
@@ -167,7 +168,7 @@ timeout = 120
 [[lab.steps]]
 title = "Build production using two patch styles"
 task = '''
-Configure the prod overlay with prefix prod-, suffix -v1, namespace kustomize-lab, environment=prod metadata and Pod labels, nginx:1.27-alpine, and MODE=production through a merged generator. Use a strategic merge patch for replicas=2 and a JSON 6902 patch for web requests cpu=10m,memory=16Mi. Render and apply; wait for prod-dojo-web-v1.
+Configure the prod overlay with prefix prod-, suffix -v1, namespace kustomize-prod (the development and production Pods share labels and selectors, so they must not share a namespace), environment=prod metadata and Pod labels, nginx:1.27-alpine, and MODE=production through a merged generator. Use a strategic merge patch for replicas=2 and a JSON 6902 patch for web requests cpu=10m,memory=16Mi. Render and apply; wait for prod-dojo-web-v1.
 '''
 hints = ["Place the strategic merge patch in overlays/prod/replicas.yaml and reference it from patches.", "A JSON patch can add the resources map because the base has no resources field."]
 solution = '''
@@ -177,7 +178,7 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
 - ../../base
-namespace: kustomize-lab
+namespace: kustomize-prod
 namePrefix: prod-
 nameSuffix: -v1
 labels:
@@ -218,22 +219,86 @@ spec:
 EOF
 kubectl kustomize overlays/prod
 kubectl apply -k overlays/prod
-kubectl -n kustomize-lab rollout status deployment/prod-dojo-web-v1 --timeout=120s
+kubectl -n kustomize-prod rollout status deployment/prod-dojo-web-v1 --timeout=120s
 ```
 '''
 
 [[lab.steps.checks]]
 name = "production patches and rewritten configuration are live"
 run = '''
-kubectl -n kustomize-lab get deployment/prod-dojo-web-v1 -o name >/dev/null 2>&1 || exit 1
+kubectl -n kustomize-prod get deployment/prod-dojo-web-v1 -o name >/dev/null 2>&1 || exit 1
 for i in $(seq 1 45); do
-  if [ "$(kubectl -n kustomize-lab get deployment/prod-dojo-web-v1 -o jsonpath='{.spec.template.spec.containers[0].resources.requests.cpu} {.spec.template.spec.containers[0].resources.requests.memory} {.metadata.labels.environment}')" = "10m 16Mi prod" ] && [ "$(kubectl -n kustomize-lab get deployment/prod-dojo-web-v1 -o jsonpath='{.status.observedGeneration} {.status.updatedReplicas} {.status.readyReplicas} {.status.availableReplicas} {.status.replicas}')" = "$(kubectl -n kustomize-lab get deployment/prod-dojo-web-v1 -o jsonpath='{.metadata.generation}') 2 2 2 2" ] && cm=$(kubectl -n kustomize-lab get deployment/prod-dojo-web-v1 -o jsonpath='{.spec.template.spec.containers[0].envFrom[0].configMapRef.name}') && [ "$(kubectl -n kustomize-lab get configmap "$cm" -o jsonpath='{.data.MODE}')" = production ]; then echo ok; exit 0; fi
+  if [ "$(kubectl -n kustomize-prod get deployment/prod-dojo-web-v1 -o jsonpath='{.spec.template.spec.containers[0].resources.requests.cpu} {.spec.template.spec.containers[0].resources.requests.memory} {.metadata.labels.environment}')" = "10m 16Mi prod" ] && [ "$(kubectl -n kustomize-prod get deployment/prod-dojo-web-v1 -o jsonpath='{.status.observedGeneration} {.status.updatedReplicas} {.status.readyReplicas} {.status.availableReplicas} {.status.replicas}')" = "$(kubectl -n kustomize-prod get deployment/prod-dojo-web-v1 -o jsonpath='{.metadata.generation}') 2 2 2 2" ] && cm=$(kubectl -n kustomize-prod get deployment/prod-dojo-web-v1 -o jsonpath='{.spec.template.spec.containers[0].envFrom[0].configMapRef.name}') && [ "$(kubectl -n kustomize-prod get configmap "$cm" -o jsonpath='{.data.MODE}')" = production ]; then echo ok; exit 0; fi
   sleep 2
 done
 exit 1
 '''
 equals = "ok"
 timeout = 120
+
+[[lab.steps.checks]]
+name = "each environment's Service reaches only its own Pods"
+run = '''
+eps() { kubectl -n "$1" get endpointslices -l kubernetes.io/service-name="$2" -o jsonpath='{range .items[*].endpoints[*]}{.targetRef.namespace}/{.targetRef.name}{"\n"}{end}' | sort -u; }
+envs() { while read -r ref; do [ -n "$ref" ] && kubectl -n "${ref%%/*}" get pod "${ref#*/}" -o jsonpath='{.metadata.labels.environment}{"\n"}'; done; }
+for i in $(seq 1 30); do
+  dev=$(eps kustomize-dev dev-dojo-web | envs | sort | tr '\n' ' ')
+  prod=$(eps kustomize-prod prod-dojo-web-v1 | envs | sort | tr '\n' ' ')
+  if [ "$dev" = "dev " ] && [ "$prod" = "prod prod " ]; then echo ok; exit 0; fi
+  sleep 2
+done
+echo "dev-dojo-web endpoints: [$dev], prod-dojo-web-v1 endpoints: [$prod]"
+'''
+equals = "ok"
+timeout = 90
+
+[[lab.steps.negatives]]
+name = "deploys production into the development namespace, so both Services select both environments"
+run = '''
+mkdir -p overlays/prod-shared
+cat > overlays/prod-shared/kustomization.yaml <<'YAML'
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../base
+namespace: kustomize-dev
+namePrefix: prod-
+nameSuffix: -v1
+labels:
+- pairs:
+    environment: prod
+  includeTemplates: true
+  includeSelectors: false
+images:
+- name: nginx
+  newTag: 1.27-alpine
+patches:
+- target:
+    kind: Deployment
+    name: dojo-web
+  patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 2
+    - op: add
+      path: /spec/template/spec/containers/0/resources
+      value:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+configMapGenerator:
+- name: dojo-settings
+  behavior: merge
+  literals:
+  - MODE=production
+YAML
+kubectl apply -k overlays/prod-shared
+kubectl -n kustomize-dev rollout status deployment/prod-dojo-web-v1 --timeout=120s
+'''
+undo = '''
+kubectl delete -k overlays/prod-shared --ignore-not-found --wait=true
+rm -rf overlays/prod-shared
+'''
 
 [[lab.steps]]
 title = "Roll development configuration forward"
@@ -247,16 +312,16 @@ sed 's/MODE=development/MODE=learning/' base/kustomization.yaml > base/kustomiza
 mv base/kustomization.next base/kustomization.yaml
 kubectl kustomize overlays/dev
 kubectl apply -k overlays/dev
-kubectl -n kustomize-lab rollout status deployment/dev-dojo-web --timeout=120s
+kubectl -n kustomize-dev rollout status deployment/dev-dojo-web --timeout=120s
 ```
 '''
 
 [[lab.steps.checks]]
 name = "hashed references resolve to the updated configuration and practice Secret"
 run = '''
-cm=$(kubectl -n kustomize-lab get deployment/dev-dojo-web -o jsonpath='{.spec.template.spec.containers[0].envFrom[0].configMapRef.name}'); [ "$(kubectl -n kustomize-lab get configmap "$cm" -o jsonpath='{.data.MODE}')" = learning ] || exit 1
+cm=$(kubectl -n kustomize-dev get deployment/dev-dojo-web -o jsonpath='{.spec.template.spec.containers[0].envFrom[0].configMapRef.name}'); [ "$(kubectl -n kustomize-dev get configmap "$cm" -o jsonpath='{.data.MODE}')" = learning ] || exit 1
 for i in $(seq 1 45); do
-  if cm=$(kubectl -n kustomize-lab get deployment/dev-dojo-web -o jsonpath='{.spec.template.spec.containers[0].envFrom[0].configMapRef.name}'); secret=$(kubectl -n kustomize-lab get deployment/dev-dojo-web -o jsonpath='{.spec.template.spec.containers[0].env[0].valueFrom.secretKeyRef.name}'); case "$cm:$secret" in dev-dojo-settings-*:dev-dojo-credentials-*) [ "$(kubectl -n kustomize-lab get configmap "$cm" -o jsonpath='{.data.MODE}')" = learning ] && [ "$(kubectl -n kustomize-lab get secret "$secret" -o jsonpath='{.data.TOKEN}')" = cHJhY3RpY2Utb25seQ== ] && [ "$(kubectl -n kustomize-lab get deployment/dev-dojo-web -o jsonpath='{.status.observedGeneration} {.status.updatedReplicas} {.status.readyReplicas} {.status.availableReplicas} {.status.replicas}')" = "$(kubectl -n kustomize-lab get deployment/dev-dojo-web -o jsonpath='{.metadata.generation}') 1 1 1 1" ] ;; *) false ;; esac; then echo ok; exit 0; fi
+  if cm=$(kubectl -n kustomize-dev get deployment/dev-dojo-web -o jsonpath='{.spec.template.spec.containers[0].envFrom[0].configMapRef.name}'); secret=$(kubectl -n kustomize-dev get deployment/dev-dojo-web -o jsonpath='{.spec.template.spec.containers[0].env[0].valueFrom.secretKeyRef.name}'); case "$cm:$secret" in dev-dojo-settings-*:dev-dojo-credentials-*) [ "$(kubectl -n kustomize-dev get configmap "$cm" -o jsonpath='{.data.MODE}')" = learning ] && [ "$(kubectl -n kustomize-dev get secret "$secret" -o jsonpath='{.data.TOKEN}')" = cHJhY3RpY2Utb25seQ== ] && [ "$(kubectl -n kustomize-dev get deployment/dev-dojo-web -o jsonpath='{.status.observedGeneration} {.status.updatedReplicas} {.status.readyReplicas} {.status.availableReplicas} {.status.replicas}')" = "$(kubectl -n kustomize-dev get deployment/dev-dojo-web -o jsonpath='{.metadata.generation}') 1 1 1 1" ] ;; *) false ;; esac; then echo ok; exit 0; fi
   sleep 2
 done
 exit 1
@@ -300,21 +365,21 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
 - ../../base
-namespace: kustomize-lab
+namespace: kustomize-dev
 namePrefix: dev-
 images:
 - name: nginx
   newTag: 1.27-alpine
 ```
 
-`namespace` assigns namespaced output resources; it does not create a Namespace unless you include one. The lab setup creates its namespace idempotently. A namespace transformer also does not turn a ClusterRole into a namespaced object. Know each resource's scope before applying a large build.
+`namespace` assigns namespaced output resources; it does not create a Namespace unless you include one. The lab setup creates its namespaces idempotently. Give each environment its own namespace: the overlays share the base's `app: dojo-web` selector, so a dev Service in the same namespace as the prod Pods would send traffic to production too (prefixes rename objects, not the labels their selectors match). A namespace transformer also does not turn a ClusterRole into a namespaced object. Know each resource's scope before applying a large build.
 
 Render before applying:
 
 ```bash
 kubectl kustomize overlays/dev
 kubectl apply -k overlays/dev
-kubectl -n kustomize-lab rollout status deployment/dev-dojo-web --timeout=120s
+kubectl -n kustomize-dev rollout status deployment/dev-dojo-web --timeout=120s
 ```
 
 A successful build proves the local composition worked. Server validation, scheduling, image pulling, and application readiness still happen later. Read the rendered YAML when an overlay produces a surprising image or reference; it is the final document that determines behavior.

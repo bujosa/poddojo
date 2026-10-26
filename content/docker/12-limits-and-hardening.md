@@ -8,31 +8,31 @@ objectives = ["Apply memory, CPU and PID limits without stressing the host", "Ru
 
 [[quiz]]
 q = "What happens when a container demands more CPU than its --cpus budget?"
-choices = ["It must be OOM-killed", "Its CPU execution is generally throttled", "Docker grants it another kernel", "It gains a higher scheduling priority"]
+choices = ["It must be OOM-killed", "Its CPU execution is generally throttled", "It may use spare CPU freely, because --cpus is only a request", "It gains a higher scheduling priority"]
 answer = 1
 why = "A CPU quota limits how much execution time the cgroup gets. CPU pressure generally throttles work, whereas exceeding a hard memory limit can trigger an OOM kill."
 
 [[quiz]]
 q = "Does exit code 137 prove the kernel OOM-killed the container?"
-choices = ["Yes, always", "No; it indicates SIGKILL by convention, so inspect OOMKilled and surrounding evidence", "It means a missing executable", "It means the healthcheck passed"]
+choices = ["Yes, always", "No; it indicates SIGKILL by convention, so inspect OOMKilled and surrounding evidence", "No; 137 always means the container was stopped with `docker stop`", "Yes, whenever a memory limit was set"]
 answer = 1
 why = "137 is conventionally 128 plus signal 9. A forced kill can produce it too. Docker State.OOMKilled or Kubernetes terminated reason OOMKilled provides the stronger memory-specific evidence."
 
 [[quiz]]
 q = "What can still be writable with --read-only?"
-choices = ["Nothing, including every mount", "Explicit writable mounts such as a tmpfs at /tmp", "Every image layer", "Only the Dockerfile"]
+choices = ["Nothing, including every mount", "Explicit writable mounts such as a tmpfs at /tmp", "The container's writable layer, but not its mounts", "Only /etc and /var, which Docker keeps writable"]
 answer = 1
 why = "The flag protects the root filesystem. Separate writable volumes and tmpfs mounts can still provide intentionally limited write locations."
 
 [[quiz]]
 q = "Which Kubernetes container setting corresponds to --security-opt no-new-privileges?"
-choices = ["privileged: true", "runAsUser: 0", "allowPrivilegeEscalation: false", "hostNetwork: true"]
+choices = ["readOnlyRootFilesystem: true", "runAsNonRoot: true", "allowPrivilegeEscalation: false", "capabilities: drop: [ALL]"]
 answer = 2
 why = "allowPrivilegeEscalation controls the Linux no_new_privs mechanism. It is separate from choosing a non-root UID and dropping capabilities; privileged containers and CAP_SYS_ADMIN have special implications."
 
 [[quiz]]
 q = "Is --pids-limit directly configured by a standard Pod container resources.limits.pids field?"
-choices = ["Yes, with an integer", "No; kubelet/node PID management is separate from normal container CPU/memory resource fields", "Only with requests.pids", "It maps to restartPolicy"]
+choices = ["Yes, with an integer", "No; kubelet/node PID management is separate from normal container CPU/memory resource fields", "Yes, but only in limits, not in requests", "No; it maps to a pids default in a LimitRange"]
 answer = 1
 why = "The standard per-container resource list has no ordinary pids limit equivalent. Node administrators can configure Pod PID limits through kubelet; a CKAD task should not invent an unsupported YAML field."
 

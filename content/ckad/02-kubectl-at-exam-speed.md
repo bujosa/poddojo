@@ -24,7 +24,7 @@ why = "Client dry-run produces a scaffold. Server admission and runtime behavior
 
 [[quiz]]
 q = "Set image reports that container api was not found. What should you inspect?"
-choices = ["The Deployment's container names", "The Docker context", "The namespace UID", "The Service's cluster IP"]
+choices = ["The Deployment's container names", "The Deployment's labels", "The image repository and tag", "The ReplicaSet's selector"]
 answer = 0
 why = "The assignment uses CONTAINER=IMAGE. A Deployment called api may contain a container called nginx."
 
@@ -32,9 +32,9 @@ why = "The assignment uses CONTAINER=IMAGE. A Deployment called api may contain 
 q = "You label a Deployment owner=learner. Are its existing Pods automatically relabeled?"
 choices = [
   "Yes, labels always cascade",
-  "Only on the worker node",
+  "Yes, after the next rollout",
   "No; Deployment metadata and Pod template metadata are different",
-  "Only when there are two replicas",
+  "Only Pods created after the label is added",
 ]
 answer = 2
 why = "To affect Pods, edit spec.template.metadata.labels. Changing the template causes replacement Pods to be created."
@@ -42,10 +42,10 @@ why = "To affect Pods, edit spec.template.metadata.labels. Changing the template
 [[quiz]]
 q = "Why is force deletion risky?"
 choices = [
-  "It encrypts the Pod",
-  "It waits forever",
+  "It also deletes the Pod's PersistentVolumeClaims",
+  "It also deletes the Pod's ReplicaSet",
   "It removes the API object without confirming process termination",
-  "It deletes the namespace",
+  "It bypasses RBAC checks on the delete",
 ]
 answer = 2
 why = "A process can outlive force deletion temporarily. Replacements can overlap with an old instance, which matters especially for shared or stateful work."

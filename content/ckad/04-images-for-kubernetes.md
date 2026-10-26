@@ -15,29 +15,29 @@ domain = "design-build"
 [[quiz]]
 q = "Why can a kind Pod fail to find an image built by Docker?"
 choices = [
-  "Docker images cannot run in Kubernetes",
+  "containerd cannot run images built by Docker",
   "The node runtime has a separate image store",
-  "The namespace must be named docker",
-  "The image needs a Service",
+  "kind nodes can only pull from Docker Hub",
+  "Local images must use the latest tag",
 ]
 answer = 1
 why = "Docker runs the kind nodes, while containerd inside them runs Pods. Load the image into the named kind cluster or publish it to a reachable registry."
 
 [[quiz]]
 q = "Which policy fits a locally loaded dojo/greeter:1.0 image?"
-choices = ["Always, because it avoids the registry", "IfNotPresent", "DownloadOnce", "OnlyLatest"]
+choices = ["Always, because it avoids the registry", "IfNotPresent", "Unset, because a versioned tag defaults to Always", "Always, with an imagePullSecret for the local store"]
 answer = 1
 why = "IfNotPresent can use the node's loaded image. Always performs registry resolution and may fail for a tag that only exists locally."
 
 [[quiz]]
 q = "You change an existing Deployment's image tag. Does its defaulted pull policy automatically change?"
-choices = ["Yes, every time", "Only if replicas is one", "No; set the policy explicitly when needed", "Only on a worker"]
+choices = ["Yes, every time", "Yes, if the new tag is latest", "No; set the policy explicitly when needed", "Yes, the API server recomputes defaults on every update"]
 answer = 2
 why = "Pull policy defaulting happens at creation. Editing the image reference later does not recompute an already recorded policy."
 
 [[quiz]]
 q = "What does an image digest provide that a mutable tag does not?"
-choices = ["A Pod IP", "Registry authentication", "Content identity", "A readiness probe"]
+choices = ["A signature proving who built the image", "Registry authentication", "Content identity", "Automatic updates when the image is rebuilt"]
 answer = 2
 why = "A digest identifies content. A tag can be reassigned, so the same text can resolve to different bytes over time."
 
