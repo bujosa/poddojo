@@ -14,6 +14,7 @@ pub mod lab;
 pub mod paths;
 pub mod profiles;
 pub mod settings;
+pub mod shell;
 pub mod targets;
 pub mod terminal;
 

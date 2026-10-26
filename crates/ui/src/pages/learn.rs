@@ -4,7 +4,7 @@ use egui::{Color32, Margin, RichText, Stroke};
 use poddojo_core::{Lab, Lesson, LessonStatus, Needs, QuizScore, now};
 use poddojo_runner::lab;
 
-use super::{accent_button, domain_title};
+use super::{INSTRUCTIONS_MIN, TERMINAL_MIN, accent_button, domain_title};
 use crate::icons::{self, Icon};
 use crate::jobs::Done;
 use crate::markdown::{self, Action};
@@ -398,9 +398,8 @@ impl App {
                 }
             });
         }
-        let ctx = ui.ctx().clone();
         if let Some(Action::Run(cmd)) = markdown::show(ui, t, &l.body, &l.id) {
-            self.run_in_console(&ctx, &cmd);
+            self.run_in_terminal(&cmd);
         }
         ui.add_space(14.0);
         let read = self.progress.lesson(&l.id).is_some_and(|p| p.read);
@@ -578,9 +577,15 @@ impl App {
         });
         ui.add_space(4.0);
         let total = ui.available_rect_before_wrap();
-        let left_w = (total.width() * 0.46).clamp(380.0, 620.0);
-        let left = egui::Rect::from_min_size(total.min, egui::vec2(left_w, total.height()));
-        let right = egui::Rect::from_min_max(egui::pos2(total.min.x + left_w + 16.0, total.min.y), total.max);
+        let mut split = self.settings.lab_split;
+        let default = (total.width() * 0.38).clamp(INSTRUCTIONS_MIN, 620.0);
+        let (left, right, save) =
+            super::resizable_split(ui, t, "lab", total, &mut split, default, (INSTRUCTIONS_MIN, TERMINAL_MIN));
+        self.settings.lab_split = split;
+        if save {
+            self.save_settings();
+        }
+        let left_w = left.width();
         ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
             ui.set_clip_rect(left.intersect(ui.clip_rect()));
             let reset = std::mem::take(&mut self.learn.scroll_to_top);
@@ -589,7 +594,7 @@ impl App {
                 area = area.vertical_scroll_offset(0.0);
             }
             area.show(ui, |ui| {
-                ui.set_width(left_w - 12.0);
+                ui.set_width((left_w - 12.0).max(0.0));
                 self.lab_toolbar(ui, t, l, &labdef);
                 ui.add_space(10.0);
                 self.lab_steps(ui, t, l, &labdef);
@@ -738,7 +743,7 @@ impl App {
                     }
                     ui.add_space(4.0);
                     if let Some(Action::Run(cmd)) = markdown::show(ui, t, &step.task, &format!("{}-task-{i}", l.id)) {
-                        self.run_in_console(&ctx, &cmd);
+                        self.run_in_terminal(&cmd);
                     }
                     let shown = self.learn.hints.get(&i).copied().unwrap_or(0);
                     for (h, hint) in step.hints.iter().enumerate().take(shown) {
@@ -807,7 +812,7 @@ impl App {
                             if let Some(Action::Run(cmd)) =
                                 markdown::show(ui, t, &step.solution, &format!("{}-sol-{i}", l.id))
                             {
-                                self.run_in_console(&ctx, &cmd);
+                                self.run_in_terminal(&cmd);
                             }
                         });
                     }

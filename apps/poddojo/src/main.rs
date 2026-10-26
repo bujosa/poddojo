@@ -10,10 +10,18 @@ impl eframe::App for Shell {
 }
 
 fn main() -> eframe::Result {
+    // Development aid for screenshots: `PODDOJO_WINDOW=1100x760`.
+    let size = std::env::var("PODDOJO_WINDOW")
+        .ok()
+        .and_then(|s| {
+            let (w, h) = s.split_once('x')?;
+            Some([w.trim().parse::<f32>().ok()?, h.trim().parse::<f32>().ok()?])
+        })
+        .unwrap_or([1360.0, 880.0]);
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("PodDojo")
         .with_app_id("dev.bujosa.poddojo")
-        .with_inner_size([1360.0, 880.0])
+        .with_inner_size(size)
         .with_min_inner_size([960.0, 600.0]);
     if let Some((rgba, width, height)) = poddojo_ui::icon_rgba() {
         viewport = viewport.with_icon(egui::IconData { rgba, width, height });

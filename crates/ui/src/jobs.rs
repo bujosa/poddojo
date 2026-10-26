@@ -6,7 +6,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use poddojo_core::{CheckResult, CommandOutput, ExamAttempt};
+use poddojo_core::{CheckResult, ExamAttempt};
 use poddojo_runner::cluster::Status;
 use poddojo_runner::doctor::Tool;
 use poddojo_runner::explore::{KubeObject, Layer, Row};
@@ -21,10 +21,6 @@ pub enum Done {
         info: Result<EngineInfo, String>,
     },
     Cluster(Status),
-    Console {
-        entry: u64,
-        out: CommandOutput,
-    },
     Prepared {
         lesson: String,
         ok: bool,

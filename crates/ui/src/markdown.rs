@@ -31,7 +31,7 @@ type Cells = Vec<Vec<Span>>;
 
 /// What the reader asked for by clicking inside the Markdown.
 pub enum Action {
-    /// Run this shell snippet in the console.
+    /// Run this shell snippet in the terminal.
     Run(String),
 }
 
@@ -376,7 +376,7 @@ pub fn code_block(ui: &mut egui::Ui, t: &Tokens, lang: &str, text: &str, id: &st
                         && runnable(text)
                         && ui
                             .small_button("▶ Run")
-                            .on_hover_text("Run in the console, on your chosen machine")
+                            .on_hover_text("Run it in the terminal, on your chosen machine")
                             .clicked()
                     {
                         let script =
