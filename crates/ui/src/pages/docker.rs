@@ -7,6 +7,16 @@ use crate::jobs::Done;
 use crate::theme::{self, Tokens};
 use crate::{App, DockerTab};
 
+/// Created by PodDojo's labs (or its lab cluster), by the naming rule every lab follows.
+fn is_dojo(name: &str) -> bool {
+    let name = name.trim_start_matches('/');
+    name.starts_with("dojo-")
+        || name.starts_with("dojo/")
+        || name.starts_with("poddojo")
+        || name.starts_with("kindest/")
+        || name == "kind"
+}
+
 fn field<'a>(r: &'a Row, k: &str) -> &'a str {
     r.get(k).map_or("", String::as_str)
 }
@@ -68,7 +78,22 @@ impl App {
                 }
             }
             ui.separator();
-            ui.add(egui::TextEdit::singleline(&mut self.docker.filter).hint_text("filter").desired_width(160.0));
+            egui::Frame::new()
+                .fill(t.card_hover.gamma_multiply(0.5))
+                .stroke(egui::Stroke::new(1.0, t.border))
+                .corner_radius(10)
+                .inner_margin(egui::Margin::symmetric(10, 4))
+                .show(ui, |ui| {
+                    crate::icons::show(ui, crate::icons::Icon::Search, 14.0, t.muted);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.docker.filter)
+                            .frame(egui::Frame::NONE)
+                            .hint_text("Filter")
+                            .desired_width(150.0),
+                    );
+                });
+            ui.checkbox(&mut self.docker.show_all, "Show everything on this machine")
+                .on_hover_text("Off: only what PodDojo's labs created (dojo-… names and the lab cluster)");
             if crate::icons::button(ui, crate::icons::Icon::Refresh, "Refresh").clicked() {
                 self.refresh_docker(&ctx);
             }
@@ -91,6 +116,7 @@ impl App {
     fn filtered(&self, rows: &[Row], keys: &[&str]) -> Vec<Row> {
         let f = self.docker.filter.to_lowercase();
         rows.iter()
+            .filter(|r| self.docker.show_all || keys.first().is_some_and(|k| is_dojo(field(r, k))))
             .filter(|r| f.is_empty() || keys.iter().any(|k| field(r, k).to_lowercase().contains(&f)))
             .cloned()
             .collect()
@@ -102,6 +128,15 @@ impl App {
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             if rows.is_empty() {
+                let hidden = if self.docker.show_all { 0 } else { self.docker.containers.len() };
+                if hidden > 0 {
+                    ui.label(
+                        RichText::new(format!(
+                            "No PodDojo containers ({hidden} other container(s) hidden: tick \"Show everything\")."
+                        ))
+                        .color(t.muted),
+                    );
+                }
                 ui.label(
                     RichText::new("No containers. Try: docker run -d --name dojo-web -p 18080:80 nginx:1.27-alpine")
                         .color(t.muted),
@@ -119,7 +154,8 @@ impl App {
                         let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
                         ui.painter().circle_filled(rect.center(), 5.0, if running { t.good } else { t.muted });
                         ui.label(RichText::new(&name).strong().size(15.0));
-                        if name.starts_with("dojo-") || name.starts_with("poddojo-") {
+                        let ours = is_dojo(&name);
+                        if ours {
                             theme::chip(ui, "dojo", t.accent, t.accent_soft);
                         }
                         let image = field(r, "Image");
@@ -142,7 +178,11 @@ impl App {
                                     run = Some(format!("docker top {q}"));
                                 }
                                 if ui.small_button("stop").clicked() {
-                                    run = Some(format!("docker stop {q}"));
+                                    if ours {
+                                        run = Some(format!("docker stop {q}"));
+                                    } else {
+                                        self.docker.confirm_stop = Some(name.clone());
+                                    }
                                 }
                             } else if ui.small_button("start").clicked() {
                                 run = Some(format!("docker start {q}"));
@@ -160,6 +200,29 @@ impl App {
                 ui.add_space(4.0);
             }
         });
+        if let Some(name) = self.docker.confirm_stop.clone() {
+            let mut keep_open = true;
+            egui::Window::new("Stop this container?")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    ui.label(RichText::new(format!("⚠ `{name}` was not created by PodDojo.")).color(t.amber));
+                    ui.label("Something else on this machine may depend on it.");
+                    ui.horizontal(|ui| {
+                        if ui.button("Stop it").clicked() {
+                            run = Some(format!("docker stop {}", shell_quote(&name)));
+                            keep_open = false;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            keep_open = false;
+                        }
+                    });
+                });
+            if !keep_open {
+                self.docker.confirm_stop = None;
+            }
+        }
         if let Some(name) = self.docker.confirm_remove.clone() {
             let mut keep_open = true;
             egui::Window::new("Remove container?")
@@ -171,7 +234,7 @@ impl App {
                         "This stops and deletes `{name}` on {}. Its writable layer is lost.",
                         self.target_name()
                     ));
-                    if !name.starts_with("dojo-") {
+                    if !is_dojo(&name) {
                         ui.label(RichText::new("⚠ This container was not created by PodDojo.").color(t.amber));
                     }
                     ui.horizontal(|ui| {

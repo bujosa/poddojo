@@ -20,6 +20,8 @@ pub enum Icon {
     Refresh,
     Flag,
     Search,
+    Repeat,
+    Docs,
 }
 
 /// Paint `icon` in `rect` (square) with `color`.
@@ -139,6 +141,35 @@ pub fn paint(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
             painter.circle_stroke(p(10.5, 10.5), s * 6.0 / 24.0, st);
             line(p(15.0, 15.0), p(20.0, 20.0));
         }
+        Icon::Repeat => {
+            // Two arrows chasing each other round a loop.
+            let r = s * 7.0 / 24.0;
+            for (from, to) in [(0.35f32, 2.75f32), (3.5, 5.9)] {
+                let pts: Vec<Pos2> = (0..=12)
+                    .map(|i| {
+                        let a = from + (to - from) * i as f32 / 12.0;
+                        c + vec2(a.cos(), a.sin()) * r
+                    })
+                    .collect();
+                let end = pts[pts.len() - 1];
+                let dir = vec2(-(to.sin()), to.cos());
+                let side = vec2(to.cos(), to.sin());
+                painter.add(egui::Shape::line(pts, st));
+                painter.add(egui::Shape::convex_polygon(
+                    vec![end + dir * (s * 3.0 / 24.0), end + side * (s * 2.6 / 24.0), end - side * (s * 2.6 / 24.0)],
+                    color,
+                    Stroke::NONE,
+                ));
+            }
+        }
+        Icon::Docs => {
+            poly(vec![p(5.0, 3.0), p(15.0, 3.0), p(19.0, 7.0), p(19.0, 21.0), p(5.0, 21.0)]);
+            line(p(15.0, 3.0), p(15.0, 7.0));
+            line(p(15.0, 7.0), p(19.0, 7.0));
+            for y in [11.0, 14.5, 18.0] {
+                line(p(8.0, y), p(16.0, y));
+            }
+        }
     }
 }
 
@@ -158,6 +189,7 @@ pub fn button(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
     let gap = if label.is_empty() { 0.0 } else { 7.0 };
     let size = vec2(pad.x * 2.0 + icon_size + gap + galley.size().x, (galley.size().y + pad.y * 2.0).max(28.0));
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
     if ui.is_rect_visible(rect) {
         let v = ui.style().interact(&resp);
         ui.painter().rect(rect, v.corner_radius, v.weak_bg_fill, v.bg_stroke, egui::StrokeKind::Inside);

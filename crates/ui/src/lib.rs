@@ -37,17 +37,21 @@ pub enum Page {
     Docker,
     Cluster,
     Exams,
+    Review,
+    Reference,
     Progress,
     Setup,
 }
 
 impl Page {
-    const ALL: [(Page, Icon, &'static str); 7] = [
+    const ALL: [(Page, Icon, &'static str); 9] = [
         (Page::Home, Icon::Home, "Home"),
         (Page::Learn, Icon::Book, "Learn"),
+        (Page::Review, Icon::Repeat, "Review"),
+        (Page::Exams, Icon::Stopwatch, "Exams"),
+        (Page::Reference, Icon::Docs, "Reference"),
         (Page::Docker, Icon::Container, "Docker explorer"),
         (Page::Cluster, Icon::Cluster, "Lab cluster"),
-        (Page::Exams, Icon::Stopwatch, "Exams"),
         (Page::Progress, Icon::Chart, "Progress"),
         (Page::Setup, Icon::Gear, "Setup"),
     ];
@@ -105,6 +109,10 @@ pub struct DockerState {
     pub layers: Vec<Layer>,
     pub layers_error: Option<String>,
     pub confirm_remove: Option<String>,
+    /// Show everything on the machine, not only what PodDojo's labs created.
+    pub show_all: bool,
+    /// `docker stop` on a container PodDojo did not create, waiting for confirmation.
+    pub confirm_stop: Option<String>,
 }
 
 #[derive(Default)]
@@ -140,14 +148,6 @@ pub struct ExamState {
     /// The task list drawer is open (narrow windows fold the list away).
     pub drawer: bool,
     pub log: String,
-    pub drill: Option<Drill>,
-}
-
-/// A knowledge drill: random quiz questions from lessons already opened.
-pub struct Drill {
-    pub questions: Vec<(String, usize)>,
-    pub answers: Vec<Option<usize>>,
-    pub submitted: bool,
 }
 
 pub struct App {
@@ -179,6 +179,8 @@ pub struct App {
     pub docker: DockerState,
     pub kube: KubeState,
     pub exam: ExamState,
+    pub review: pages::ReviewState,
+    pub reference: pages::ReferenceState,
     pub toasts: Vec<(String, bool, Instant)>,
     pub logo: Option<egui::TextureHandle>,
     last_minute: Instant,
@@ -234,6 +236,8 @@ impl App {
             docker: DockerState::default(),
             kube: KubeState { kind: "pods".into(), ..Default::default() },
             exam: ExamState::default(),
+            review: pages::ReviewState::default(),
+            reference: pages::ReferenceState::default(),
             toasts: Vec::new(),
             logo: logo::texture(ctx),
             last_minute: Instant::now(),
@@ -327,6 +331,8 @@ impl App {
     pub fn terminal_env(&self) -> Option<LabEnv> {
         let id = if let Some(e) = &self.progress.active_exam {
             format!("exam-{}", e.exam_id)
+        } else if let Some(d) = self.review.drill.as_ref().filter(|_| self.page == Page::Review) {
+            format!("exam-{}", d.exam)
         } else if let Some(l) = &self.learn.lesson {
             l.clone()
         } else {
@@ -584,11 +590,13 @@ impl App {
                     self.toast("Exam setup failed: see the log", false);
                 }
             }
+            Done::DrillReady { key, ok, log } => self.drill_ready(key, ok, log),
+            Done::DrillChecked { key, results } => self.drill_checked(key, results),
             Done::ExamGraded(attempt) => {
                 let passed = attempt.passed;
                 let percent = attempt.percent;
                 self.exam.result = Some(attempt.clone());
-                self.progress.record_exam(attempt);
+                self.progress.record_exam(attempt, &self.catalog);
                 self.save_progress();
                 self.toast(format!("Score {percent:.0}%: {}", if passed { "PASS" } else { "keep training" }), passed);
                 if passed {
@@ -617,6 +625,11 @@ impl App {
             "docker" => self.page = Page::Docker,
             "cluster" => self.page = Page::Cluster,
             "exams" => self.page = Page::Exams,
+            "review" => self.page = Page::Review,
+            "reference" => {
+                self.page = Page::Reference;
+                self.reference.page = parts.next().map(str::to_string);
+            }
             "progress" => self.page = Page::Progress,
             "setup" => self.page = Page::Setup,
             _ => self.page = Page::Home,
@@ -679,6 +692,8 @@ impl App {
                 egui::Key::Num5,
                 egui::Key::Num6,
                 egui::Key::Num7,
+                egui::Key::Num8,
+                egui::Key::Num9,
             ]
             .into_iter()
             .enumerate()
@@ -693,6 +708,9 @@ impl App {
                 i.consume_key(egui::Modifiers::COMMAND, egui::Key::T),
             )
         });
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::K)) {
+            self.reference.overlay = !self.reference.overlay;
+        }
         if let Some(p) = page {
             self.page = p;
         }
@@ -743,6 +761,13 @@ impl App {
                     ui.label(RichText::new("Docker + CKAD").size(12.0).color(t.muted));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let ctx = ui.ctx().clone();
+                        if self.page != Page::Reference
+                            && icons::button(ui, Icon::Docs, "Docs")
+                                .on_hover_text("The reference in a floating window, beside your work (⌘K)")
+                                .clicked()
+                        {
+                            self.reference.overlay = !self.reference.overlay;
+                        }
                         if !self.in_workspace()
                             && icons::button(
                                 ui,
@@ -768,10 +793,27 @@ impl App {
     pub fn in_workspace(&self) -> bool {
         (self.page == Page::Learn && self.learn.tab == LessonTab::Lab && self.learn.lesson.is_some())
             || (self.page == Page::Exams && self.progress.active_exam.is_some())
+            || (self.page == Page::Review && self.review.drill.as_ref().is_some_and(|d| d.ready()))
     }
 
     /// One-click commands that fit what the learner is doing.
     pub fn terminal_chips(&self) -> Vec<String> {
+        let drill =
+            self.review.drill.as_ref().filter(|_| self.page == Page::Review && self.progress.active_exam.is_none());
+        if let Some(d) = drill {
+            let ns = self
+                .catalog
+                .exam(&d.exam)
+                .and_then(|e| e.tasks.iter().find(|t| t.id == d.task))
+                .and_then(|t| t.namespace.clone());
+            return match ns {
+                Some(ns) => vec![
+                    format!("kubectl -n {ns} get all"),
+                    format!("kubectl -n {ns} get events --sort-by=.lastTimestamp"),
+                ],
+                None => vec!["kubectl get ns".into()],
+            };
+        }
         if let Some(a) = &self.progress.active_exam {
             let ns = self
                 .catalog
@@ -996,6 +1038,8 @@ impl App {
                     | Done::Reset { .. }
                     | Done::ExamStarted { .. }
                     | Done::ExamGraded(_)
+                    | Done::DrillReady { .. }
+                    | Done::DrillChecked { .. }
             );
             if personal && owner != me {
                 continue;
@@ -1054,11 +1098,14 @@ impl App {
                     Page::Docker => self.docker_page(ui),
                     Page::Cluster => self.cluster_page(ui),
                     Page::Exams => self.exams_page(ui),
+                    Page::Review => self.review_page(ui),
+                    Page::Reference => self.reference_page(ui),
                     Page::Progress => self.progress_page(ui),
                     Page::Setup => self.setup_page(ui),
                 }
             });
         self.toasts(&ctx);
+        self.reference_overlay(&ctx);
         self.celebration(&ctx);
         self.screenshot(&ctx);
         if !self.jobs.running.is_empty() {
@@ -1135,6 +1182,8 @@ fn nav_item(
     shortcut: &str,
 ) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 38.0), egui::Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, label));
+    theme::focus_ring(ui, &resp, rect, 9.0);
     let hovered = resp.hovered();
     let hover =
         ui.ctx().animate_bool_with_time(resp.id.with("hover"), hovered && !selected, theme::motion(ui.ctx(), 0.12));
@@ -1208,6 +1257,10 @@ pub fn avatar(ui: &mut egui::Ui, p: &Profile, size: f32) -> egui::Response {
 /// The current learner at the bottom of the navigation; click to switch.
 fn profile_chip(ui: &mut egui::Ui, t: &Tokens, p: &Profile) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 44.0), egui::Sense::click());
+    resp.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{}: switch profile", p.name))
+    });
+    theme::focus_ring(ui, &resp, rect, 10.0);
     if resp.hovered() {
         ui.painter().rect_filled(rect, 10.0, t.card);
     }

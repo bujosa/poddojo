@@ -177,6 +177,15 @@ pub enum ChoiceState {
     Missed,
 }
 
+/// A visible ring around a custom control that has keyboard focus (Tab moves it, Space or Enter
+/// activates it), so the app can be driven without a mouse.
+pub fn focus_ring(ui: &egui::Ui, resp: &egui::Response, rect: egui::Rect, radius: f32) {
+    if resp.has_focus() {
+        let color = ui.visuals().selection.stroke.color;
+        ui.painter().rect_stroke(rect.expand(2.0), radius + 2.0, Stroke::new(2.0, color), egui::StrokeKind::Outside);
+    }
+}
+
 /// A quiz answer as a full-width card with a letter badge.
 pub fn choice(
     ui: &mut egui::Ui,
@@ -194,6 +203,11 @@ pub fn choice(
         egui::vec2(width, height),
         if enabled { egui::Sense::click() } else { egui::Sense::hover() },
     );
+    let picked = matches!(state, ChoiceState::Picked | ChoiceState::Correct | ChoiceState::Wrong);
+    resp.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::RadioButton, enabled, picked, format!("{letter}: {text}"))
+    });
+    focus_ring(ui, &resp, rect, 10.0);
     let hovered = enabled && resp.hovered();
     let (stroke, fill, badge) = match state {
         ChoiceState::Picked => (t.accent, t.accent_soft, t.accent),
@@ -234,6 +248,8 @@ pub fn tab(ui: &mut egui::Ui, t: &Tokens, label: &str, selected: bool, done: boo
     let font = egui::FontId::proportional(14.5);
     let galley = ui.painter().layout_no_wrap(text, font, t.text);
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(galley.size().x + 28.0, 34.0), egui::Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, label));
+    focus_ring(ui, &resp, rect, 17.0);
     let hovered = resp.hovered();
     let (fill, fg) = if selected {
         (t.accent, if t.dark { Color32::from_rgb(4, 30, 28) } else { Color32::WHITE })

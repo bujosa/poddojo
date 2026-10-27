@@ -556,13 +556,16 @@ impl App {
     }
 
     fn submit_quiz(&mut self, l: &Lesson) {
-        let correct = l.quiz.iter().zip(&self.learn.answers).filter(|(q, a)| **a == Some(q.answer)).count() as u32;
-        let score = QuizScore { correct, total: l.quiz.len() as u32 };
-        self.progress.record_quiz(l, score, now());
+        let score = self.progress.record_quiz_answers(l, &self.learn.answers, now());
         self.save_progress();
         self.learn.submitted = true;
         self.toast(
-            format!("Quiz: {correct}/{}{}", l.quiz.len(), if score.passed() { " · passed" } else { " · 70% needed" }),
+            format!(
+                "Quiz: {}/{}{}",
+                score.correct,
+                score.total,
+                if score.passed() { " · passed" } else { " · 70% needed · misses come back in Review" }
+            ),
             score.passed(),
         );
     }
@@ -701,24 +704,7 @@ impl App {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_enabled_ui(all, |ui| {
                             if accent_button(ui, t, "Submit answers").clicked() {
-                                let correct = l
-                                    .quiz
-                                    .iter()
-                                    .zip(&self.learn.answers)
-                                    .filter(|(q, a)| **a == Some(q.answer))
-                                    .count() as u32;
-                                let score = QuizScore { correct, total: l.quiz.len() as u32 };
-                                self.progress.record_quiz(l, score, now());
-                                self.save_progress();
-                                self.learn.submitted = true;
-                                self.toast(
-                                    format!(
-                                        "Quiz: {correct}/{}{}",
-                                        l.quiz.len(),
-                                        if score.passed() { " · passed" } else { " · 70% needed" }
-                                    ),
-                                    score.passed(),
-                                );
+                                self.submit_quiz(l);
                             }
                         });
                     });

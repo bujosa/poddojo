@@ -118,6 +118,34 @@ pub fn human_bytes(b: u64) -> String {
 // Kubernetes
 
 /// The resource kinds the cluster explorer lists, CKAD's working set.
+/// kubectl's short name for a resource (`""` when it has none): worth learning for exam speed.
+pub fn short_name(kind: &str) -> &'static str {
+    match kind {
+        "pods" => "po",
+        "deployments" => "deploy",
+        "replicasets" => "rs",
+        "statefulsets" => "sts",
+        "daemonsets" => "ds",
+        "cronjobs" => "cj",
+        "services" => "svc",
+        "ingresses" => "ing",
+        "networkpolicies" => "netpol",
+        "configmaps" => "cm",
+        "serviceaccounts" => "sa",
+        "persistentvolumeclaims" => "pvc",
+        "persistentvolumes" => "pv",
+        "horizontalpodautoscalers" => "hpa",
+        "namespaces" => "ns",
+        "nodes" => "no",
+        "events" => "ev",
+        "resourcequotas" => "quota",
+        "limitranges" => "limits",
+        "customresourcedefinitions" => "crd",
+        "poddisruptionbudgets" => "pdb",
+        _ => "",
+    }
+}
+
 pub const KINDS: &[&str] = &[
     "pods",
     "deployments",

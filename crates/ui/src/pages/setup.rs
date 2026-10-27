@@ -167,6 +167,9 @@ impl App {
                     })
                     .response
                     .interact(egui::Sense::click());
+                resp.widget_info(|| {
+                    egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, format!("Machine {}", target.name))
+                });
                 if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && !selected {
                     pick = Some(target.name.clone());
                 }

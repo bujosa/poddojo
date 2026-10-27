@@ -96,7 +96,7 @@ impl App {
 
     fn profile_card(&mut self, ui: &mut egui::Ui, t: &Tokens, p: &Profile, progress: &Progress) {
         let (done, total) = progress.done_count(&self.catalog);
-        let readiness = progress.overall_readiness(&self.catalog);
+        let readiness = progress.exam_readiness(&self.catalog);
         let lab = progress.labs_in_progress(&self.catalog).first().map(|l| (*l).clone());
         let resume = progress.resume(&self.catalog).cloned();
         let last = self.profiles.last().is_some_and(|l| l.id == p.id);
@@ -130,11 +130,13 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(format!("{done}/{total} lessons")).size(13.0));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            RichText::new(format!("CKAD readiness {readiness:.0}%"))
-                                .size(13.0)
-                                .color(if readiness >= 66.0 { t.good } else { t.muted }),
-                        );
+                        ui.label(RichText::new(format!("CKAD: {}", readiness.verdict.title())).size(13.0).color(
+                            match readiness.verdict {
+                                poddojo_core::Verdict::Ready => t.good,
+                                poddojo_core::Verdict::Close => t.accent,
+                                _ => t.muted,
+                            },
+                        ));
                     });
                 });
                 let w = ui.available_width();
