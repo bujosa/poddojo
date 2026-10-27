@@ -194,7 +194,7 @@ pub struct App {
     /// Machines were tested since the Setup page was opened.
     pub setup_probed: bool,
     /// `PODDOJO_SCREENSHOT=<png>`: capture this window after the first jobs settle, then quit
-    /// (with `PODDOJO_PAGE=home|learn:<lesson>[:quiz|:lab]|docker|cluster|exams|progress|setup`).
+    /// (with `PODDOJO_PAGE=home|learn:<lesson>[:quiz|:lab]|review[:session]|reference[:<id>]|docker|cluster|exams|progress|setup`).
     shot: Option<(std::path::PathBuf, Instant, bool)>,
 }
 
@@ -625,7 +625,12 @@ impl App {
             "docker" => self.page = Page::Docker,
             "cluster" => self.page = Page::Cluster,
             "exams" => self.page = Page::Exams,
-            "review" => self.page = Page::Review,
+            "review" => {
+                self.page = Page::Review;
+                if parts.next() == Some("session") {
+                    self.start_session(false);
+                }
+            }
             "reference" => {
                 self.page = Page::Reference;
                 self.reference.page = parts.next().map(str::to_string);

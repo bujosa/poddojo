@@ -265,7 +265,8 @@ impl App {
                     ui.horizontal_top(|ui| {
                         theme::chip(ui, &format!("missed {}×", lapses.max(1)), t.amber, t.amber.gamma_multiply(0.12));
                         ui.vertical(|ui| {
-                            ui.add(egui::Label::new(RichText::new(text).size(13.5)).wrap());
+                            let w = ui.available_width();
+                            ui.add(egui::Label::new(crate::markdown::inline_job(&text, 13.5, t.text, t.card_hover, w)));
                             if let Some((id, title)) = lesson
                                 && ui
                                     .add(
@@ -384,7 +385,8 @@ impl App {
             ui.set_width(ui.available_width());
             ui.label(RichText::new(lesson.title.to_uppercase()).size(11.5).strong().color(t.muted));
             ui.add_space(2.0);
-            ui.label(RichText::new(&question.q).size(19.0).strong().color(super::strong_text(t)));
+            let w = ui.available_width();
+            ui.label(crate::markdown::inline_job(&question.q, 19.0, super::strong_text(t), t.card_hover, w));
             ui.add_space(12.0);
             for (pos, j) in order.iter().copied().enumerate() {
                 let Some(choice) = question.choices.get(j) else { continue };
@@ -460,6 +462,10 @@ impl App {
                     s.picked = None;
                 }
             }
+            ui.label(
+                RichText::new("Keys: 1–4 or A–D to answer · Enter for the next question").size(12.0).color(t.muted),
+            );
+            ui.add_space(8.0);
             if ui.button(format!("Open lesson: {}", lesson.title)).clicked() {
                 close = true;
                 self.page = Page::Learn;

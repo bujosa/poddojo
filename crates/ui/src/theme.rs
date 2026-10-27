@@ -196,8 +196,8 @@ pub fn choice(
     enabled: bool,
 ) -> egui::Response {
     let width = ui.available_width();
-    let font = egui::FontId::proportional(15.0);
-    let galley = ui.painter().layout(text.to_string(), font, t.text, width - 64.0);
+    let job = crate::markdown::inline_job(text, 15.0, t.text, t.card_hover, width - 64.0);
+    let galley = ui.painter().layout_job(job);
     let height = (galley.size().y + 20.0).max(42.0);
     let (rect, resp) = ui.allocate_exact_size(
         egui::vec2(width, height),

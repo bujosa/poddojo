@@ -649,7 +649,8 @@ impl App {
             theme::card(t).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.label(RichText::new(format!("QUESTION {}", i + 1)).size(11.5).strong().color(t.muted));
-                ui.label(RichText::new(&q.q).size(16.5).strong().color(strong(t)));
+                let w = ui.available_width();
+                ui.label(crate::markdown::inline_job(&q.q, 16.5, strong(t), t.card_hover, w));
                 ui.add_space(8.0);
                 let picked_now = self.learn.answers.get(i).copied().flatten();
                 for (pos, j) in q.order(&l.id).into_iter().enumerate() {
