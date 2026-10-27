@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+- **Lessons use wide screens**: a centred reading column with larger text (16 px on 25 px lines)
+  and, on wide windows, a side rail with your progress and the next action, "On this page"
+  sections that scroll to the heading, and the lesson's CKAD domain.
+- The quiz's answered count and Submit button sit in the rail, always in reach.
+- The lesson list can be hidden for more room.
+
 ## 0.2.0
 
 - **Graders you can trust**: `dojo verify` also runs negative cases (incomplete or wrong work the
