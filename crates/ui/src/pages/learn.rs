@@ -59,6 +59,10 @@ impl App {
             self.syllabus(ui, &t);
             return;
         };
+        if self.tree_hidden {
+            self.lesson_view(ui, &t, &l);
+            return;
+        }
         super::split_left(ui, 320.0, |ui, left| {
             if left {
                 self.lesson_tree(ui, &t);
@@ -204,8 +208,16 @@ impl App {
 
     fn lesson_tree(&mut self, ui: &mut egui::Ui, t: &Tokens) {
         let mut open = None;
-        if icons::button(ui, Icon::Book, "All lessons").on_hover_text("The syllabus: every track and module").clicked()
-        {
+        let mut back = false;
+        ui.horizontal(|ui| {
+            back = icons::button(ui, Icon::Book, "All lessons")
+                .on_hover_text("The syllabus: every track and module")
+                .clicked();
+            if ui.button("Hide list").on_hover_text("More room for the lesson").clicked() {
+                self.tree_hidden = true;
+            }
+        });
+        if back {
             self.learn = LearnState::default();
             return;
         }
@@ -305,6 +317,12 @@ impl App {
 
     fn header(&mut self, ui: &mut egui::Ui, t: &Tokens, l: &Lesson, compact: bool) {
         ui.horizontal_wrapped(|ui| {
+            if self.tree_hidden
+                && !compact
+                && icons::button(ui, Icon::Book, "Lessons").on_hover_text("Show the lesson list").clicked()
+            {
+                self.tree_hidden = false;
+            }
             ui.label(RichText::new(self.catalog.module_title(l)).color(t.muted));
             ui.label(RichText::new(format!("· ~{} min", l.minutes)).color(t.muted));
             if let Some(d) = &l.domain {
@@ -362,26 +380,191 @@ impl App {
     }
 
     fn lesson_view(&mut self, ui: &mut egui::Ui, t: &Tokens, l: &Lesson) {
-        self.header(ui, t, l, false);
-        ui.separator();
-        let reset_scroll = std::mem::take(&mut self.learn.scroll_to_top);
-        let mut area = egui::ScrollArea::vertical()
-            .id_salt(format!("lesson-{}-{:?}", l.id, self.learn.tab))
-            .auto_shrink([false, false]);
-        if reset_scroll {
-            area = area.vertical_scroll_offset(0.0);
-        }
-        area.show(ui, |ui| {
-            ui.set_max_width(ui.available_width().min(880.0));
-            ui.add_space(6.0);
-            match self.learn.tab {
-                LessonTab::Concepts => self.concepts(ui, t, l),
-                LessonTab::Quiz | LessonTab::Lab => self.quiz(ui, t, l),
+        // Reading column of a comfortable width; on wide screens a side rail uses the rest of the
+        // space (progress, next action, sections, the CKAD domain), and the pair is centred.
+        let total = ui.available_rect_before_wrap();
+        let rail_w = 300.0;
+        let gap = 28.0;
+        let wide = total.width() >= 1050.0;
+        let col_w = if wide { (total.width() - rail_w - gap).min(860.0) } else { total.width() };
+        let group_w = if wide { col_w + gap + rail_w } else { col_w };
+        let x0 = total.min.x + ((total.width() - group_w) / 2.0).max(0.0);
+        let col = egui::Rect::from_min_size(egui::pos2(x0, total.min.y), egui::vec2(col_w, total.height()));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(col), |ui| {
+            ui.set_clip_rect(col.intersect(ui.clip_rect()));
+            self.header(ui, t, l, false);
+            ui.separator();
+            let reset_scroll = std::mem::take(&mut self.learn.scroll_to_top);
+            let mut area = egui::ScrollArea::vertical()
+                .id_salt(format!("lesson-{}-{:?}", l.id, self.learn.tab))
+                .auto_shrink([false, false]);
+            if reset_scroll {
+                area = area.vertical_scroll_offset(0.0);
             }
-            ui.add_space(18.0);
-            self.lesson_nav(ui, t, l);
-            ui.add_space(24.0);
+            area.show(ui, |ui| {
+                ui.set_max_width(col_w - 14.0);
+                ui.add_space(6.0);
+                match self.learn.tab {
+                    LessonTab::Concepts => self.concepts(ui, t, l),
+                    LessonTab::Quiz | LessonTab::Lab => self.quiz(ui, t, l),
+                }
+                ui.add_space(18.0);
+                self.lesson_nav(ui, t, l);
+                ui.add_space(24.0);
+            });
         });
+        if wide {
+            let rail = egui::Rect::from_min_size(
+                egui::pos2(x0 + col_w + gap, total.min.y),
+                egui::vec2(rail_w, total.height()),
+            );
+            ui.scope_builder(egui::UiBuilder::new().max_rect(rail), |ui| {
+                ui.set_clip_rect(rail.intersect(ui.clip_rect()));
+                egui::ScrollArea::vertical().id_salt(format!("rail-{}", l.id)).auto_shrink([false, false]).show(
+                    ui,
+                    |ui| {
+                        ui.set_width(rail_w - 10.0);
+                        self.lesson_rail(ui, t, l);
+                    },
+                );
+            });
+        }
+        ui.allocate_rect(total, egui::Sense::hover());
+    }
+
+    /// The side rail: where the learner stands in this lesson, the next action, the sections of the
+    /// page and what part of the CKAD this is.
+    fn lesson_rail(&mut self, ui: &mut egui::Ui, t: &Tokens, l: &Lesson) {
+        // Long section titles and competencies wrap inside the rail instead of widening it.
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+        let p = self.progress.lesson(&l.id).cloned().unwrap_or_default();
+        ui.add_space(4.0);
+        theme::card(t).inner_margin(Margin::same(16)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new("YOUR PROGRESS").size(11.5).strong().color(t.muted));
+            ui.add_space(6.0);
+            rail_check(ui, t, "Concepts", if p.read { "read".to_string() } else { "to read".to_string() }, p.read);
+            if !l.quiz.is_empty() {
+                let (txt, ok) = match p.quiz {
+                    Some(q) => (format!("best {}/{}", q.correct, q.total), q.passed()),
+                    None => (format!("{} questions", l.quiz.len()), false),
+                };
+                rail_check(ui, t, "Quiz", txt, ok);
+            }
+            if let Some(lab) = &l.lab
+                && !lab.steps.is_empty()
+            {
+                let n = p.steps.len().min(lab.steps.len());
+                rail_check(ui, t, "Lab", format!("{n}/{} steps", lab.steps.len()), n == lab.steps.len());
+            }
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(format!("~{} min · {} min studied", l.minutes, p.minutes)).size(12.5).color(t.muted),
+            );
+            ui.add_space(10.0);
+            match self.learn.tab {
+                LessonTab::Concepts => {
+                    if !p.read
+                        && ui.add_sized([ui.available_width(), 32.0], egui::Button::new("Mark as read")).clicked()
+                    {
+                        self.progress.mark_read(l, now());
+                        self.save_progress();
+                    }
+                    let next = if !l.quiz.is_empty() {
+                        Some((LessonTab::Quiz, "Take the quiz"))
+                    } else if l.has_lab() {
+                        Some((LessonTab::Lab, "Start the lab"))
+                    } else {
+                        None
+                    };
+                    if let Some((tab, label)) = next
+                        && wide_accent(ui, t, label).clicked()
+                    {
+                        if !p.read {
+                            self.progress.mark_read(l, now());
+                            self.save_progress();
+                        }
+                        self.learn.tab = tab;
+                        self.learn.scroll_to_top = true;
+                    }
+                }
+                LessonTab::Quiz | LessonTab::Lab => {
+                    let answered = self.learn.answers.iter().filter(|a| a.is_some()).count();
+                    if self.learn.submitted {
+                        if l.has_lab() && wide_accent(ui, t, "Start the lab").clicked() {
+                            self.learn.tab = LessonTab::Lab;
+                            self.learn.scroll_to_top = true;
+                        }
+                    } else {
+                        ui.label(RichText::new(format!("{answered} of {} answered", l.quiz.len())).size(13.0));
+                        let w = ui.available_width();
+                        theme::bar(
+                            ui,
+                            t,
+                            if l.quiz.is_empty() { 0.0 } else { answered as f32 / l.quiz.len() as f32 },
+                            w,
+                            t.accent,
+                        );
+                        ui.add_space(8.0);
+                        let ready = answered == l.quiz.len();
+                        ui.add_enabled_ui(ready, |ui| {
+                            if wide_accent(ui, t, "Submit answers").clicked() {
+                                self.submit_quiz(l);
+                            }
+                        });
+                    }
+                }
+            }
+        });
+        if self.learn.tab == LessonTab::Concepts {
+            let sections = markdown::headings(&l.body);
+            if !sections.is_empty() {
+                ui.add_space(12.0);
+                theme::card(t).inner_margin(Margin::same(16)).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(RichText::new("ON THIS PAGE").size(11.5).strong().color(t.muted));
+                    ui.add_space(4.0);
+                    for (i, (level, title)) in sections.iter().enumerate() {
+                        let text = if *level == 3 { format!("    {title}") } else { title.clone() };
+                        let resp = ui.add(
+                            egui::Label::new(
+                                RichText::new(text).size(if *level == 3 { 13.0 } else { 14.0 }).color(t.text),
+                            )
+                            .sense(egui::Sense::click()),
+                        );
+                        if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                            self.learn.scroll_to_section = Some(i);
+                        }
+                        ui.add_space(2.0);
+                    }
+                });
+            }
+        }
+        if let Some(d) = l.domain.as_deref().and_then(|id| poddojo_core::DOMAINS.iter().find(|x| x.id == id)) {
+            ui.add_space(12.0);
+            theme::card(t).inner_margin(Margin::same(16)).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new("CKAD DOMAIN").size(11.5).strong().color(t.muted));
+                ui.label(RichText::new(d.title).size(14.5).strong().color(strong(t)));
+                ui.label(RichText::new(format!("{}% of the exam", d.weight)).size(12.5).color(t.accent));
+                ui.add_space(4.0);
+                for c in d.competencies {
+                    ui.label(RichText::new(format!("·  {c}")).size(12.5).color(t.muted));
+                }
+            });
+        }
+    }
+
+    fn submit_quiz(&mut self, l: &Lesson) {
+        let correct = l.quiz.iter().zip(&self.learn.answers).filter(|(q, a)| **a == Some(q.answer)).count() as u32;
+        let score = QuizScore { correct, total: l.quiz.len() as u32 };
+        self.progress.record_quiz(l, score, now());
+        self.save_progress();
+        self.learn.submitted = true;
+        self.toast(
+            format!("Quiz: {correct}/{}{}", l.quiz.len(), if score.passed() { " · passed" } else { " · 70% needed" }),
+            score.passed(),
+        );
     }
 
     fn concepts(&mut self, ui: &mut egui::Ui, t: &Tokens, l: &Lesson) {
@@ -398,7 +581,8 @@ impl App {
                 }
             });
         }
-        if let Some(Action::Run(cmd)) = markdown::show(ui, t, &l.body, &l.id) {
+        let target = self.learn.scroll_to_section.take();
+        if let Some(Action::Run(cmd)) = markdown::show_scrolled(ui, t, &l.body, &l.id, target) {
             self.run_in_terminal(&cmd);
         }
         ui.add_space(14.0);
@@ -979,4 +1163,27 @@ fn lesson_row_minutes(
         t.muted,
     );
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A progress line in the side rail: label, status text and a dot.
+fn rail_check(ui: &mut egui::Ui, t: &Tokens, label: &str, status: String, done: bool) {
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+        if done {
+            ui.painter().circle_filled(rect.center(), 8.0, t.good);
+            icons::paint(ui.painter(), rect.shrink(4.0), Icon::Check, t.bg);
+        } else {
+            ui.painter().circle_stroke(rect.center(), 7.5, Stroke::new(1.4, t.muted));
+        }
+        ui.label(RichText::new(label).size(14.0).color(t.text));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(RichText::new(status).size(12.5).color(if done { t.good } else { t.muted }));
+        });
+    });
+}
+
+/// A full-width accent button for the side rail.
+fn wide_accent(ui: &mut egui::Ui, t: &Tokens, text: &str) -> egui::Response {
+    let fg = if t.dark { Color32::from_rgb(4, 30, 28) } else { Color32::WHITE };
+    ui.add_sized([ui.available_width(), 34.0], egui::Button::new(RichText::new(text).strong().color(fg)).fill(t.accent))
 }

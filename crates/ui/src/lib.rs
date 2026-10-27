@@ -77,6 +77,8 @@ pub struct LearnState {
     pub expanded: BTreeSet<usize>,
     /// The lab was prepared in this session.
     pub prepared: bool,
+    /// Section of the concepts to scroll to (from the side rail's "On this page").
+    pub scroll_to_section: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -155,6 +157,8 @@ pub struct App {
     pub welcome: WelcomeState,
     /// Lesson list filter on the Learn page.
     pub tree_filter: String,
+    /// The lesson list is folded away to give the lesson more room.
+    pub tree_hidden: bool,
     pub paths: Paths,
     pub settings: Settings,
     pub catalog: Catalog,
@@ -206,6 +210,7 @@ impl App {
         let cluster_record = ClusterRecord::load(&paths);
         let mut app = Self {
             tree_filter: String::new(),
+            tree_hidden: std::env::var_os("PODDOJO_TREE_HIDDEN").is_some(),
             paths,
             settings,
             catalog,
