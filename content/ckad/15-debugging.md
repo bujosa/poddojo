@@ -399,7 +399,7 @@ CreateContainerConfigError happens before the process runs. A required missing S
 
 ## Explain restarts before changing limits
 
-CrashLoopBackOff is a retry delay after repeated container failure, not a root cause. Read current and previous logs, plus exit code and termination reason:
+CrashLoopBackOff is a retry delay after repeated container termination, not a root cause. Read current and previous logs, plus exit code and termination reason:
 
 ```bash
 kubectl -n debugging-lab logs deployment/dojo-crash -c main --tail=30
@@ -409,7 +409,7 @@ kubectl -n debugging-lab logs POD_NAME -c main --previous --tail=30
 kubectl -n debugging-lab get pod POD_NAME -o yaml
 ```
 
-A shell syntax error, missing executable, bad flag, application exception, or liveness failure can all cause restarts. A short-lived successful command can also restart under a Deployment's Always policy; use a Job when the intended workload is completion rather than continuous service.
+A shell syntax error, missing executable, bad flag, application exception, or liveness failure can all cause restarts. A short-lived successful command can also restart under a Deployment's Always policy; use a Job when the intended workload is completion rather than continuous service. In a shell command, `exec sleep 3600` replaces the shell with the long-running process after printing any diagnostic message.
 
 OOMKilled specifically points to memory termination. Exit code 137 alone is not enough: it means SIGKILL and can have other causes. Inspect `lastState.terminated.reason`, limits, events, and application behavior. Raising a limit blindly can hide a leak or make node pressure worse. `kubectl top` may help with current samples but can miss the peak immediately before a crash.
 
@@ -434,13 +434,24 @@ kubectl -n debugging-lab debug POD_NAME --container=dojo-inspector \
   -- sh -c 'wget -qO- http://127.0.0.1:80'
 ```
 
-Admission policy and RBAC can restrict ephemeral containers. They are recorded on the Pod and are not ordinary restartable application containers. Avoid adding one when normal logs already answer the question. The lab's completed diagnostic container leaves inspectable logs without opening an interactive terminal.
+Admission policy and RBAC can restrict ephemeral containers. They are recorded on the Pod, cannot be removed or changed after addition, and are not restarted automatically. Choose a fresh container name for a second diagnostic run. The lab's completed diagnostic container leaves inspectable logs without opening an interactive terminal. The [debug reference](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_debug/) explains targeting and copy options.
 
-When the original process exits too fast, create a diagnostic copy instead. For a source Pod with a shell-capable main container, `kubectl debug POD_NAME --copy-to=dojo-crash-copy --container=main -- sh -c 'sleep 3600'` changes the copied command. Inspect its inherited volumes, probes, and labels so the copy neither reproduces an unrelated failure nor accidentally joins serving traffic. Delete only that named diagnostic copy afterwards.
+When the original process exits too fast, create a diagnostic copy instead. For a source Pod with a shell-capable main container, `kubectl debug POD_NAME --copy-to=dojo-crash-copy --container=main -- sh -c 'sleep 3600'` changes the copied command. Copies drop labels and probes by default; `--keep-*` flags can retain them. Inspect inherited volumes and init containers as well, since they can reproduce a startup failure. Delete only that named diagnostic copy afterwards.
 
 ## Follow the request path
 
 A Service with no ready endpoints usually has a selector mismatch, unready Pods, or both. Compare selector labels with Pod labels, then inspect EndpointSlice readiness and target ports. A ready Pod selected on the wrong targetPort still cannot serve a request.
+
+For the lab's nginx container, this fragment belongs under the Deployment's `spec.template.spec.containers` entry:
+
+```yaml
+readinessProbe:
+  httpGet:
+    path: /
+    port: 80
+```
+
+Repair the owning template with `kubectl patch deployment`; use `--type=strategic` to merge a container entry by its `name`. For an image-only repair, `kubectl set image deployment/dojo-image main=nginx:1.27-alpine` changes the same owner. Wait for `kubectl rollout status` before judging the replacement Pods.
 
 `kubectl -n debugging-lab port-forward service/dojo-web 18080:80` creates an interactive local tunnel for testing. Keep it running in one terminal and request `http://127.0.0.1:18080` from another, then stop it. A successful port-forward tests a selected Pod and listener; it does not prove the whole ClusterIP, ingress, or external network path works.
 

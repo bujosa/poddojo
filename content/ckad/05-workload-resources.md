@@ -396,7 +396,7 @@ volumeClaimTemplates:
           storage: 64Mi
 ```
 
-The claim for ordinal zero is named data-store-0. It is different from a single shared claim mounted by every replica. Default ordered behavior creates lower ordinals before higher ones and waits for readiness; applications can depend on those sequencing rules.
+The claim for ordinal zero is named data-store-0. It is different from a single shared claim mounted by every replica. The default `OrderedReady` Pod management creates lower ordinals first, waiting for each Pod to be Running and Ready before creating the next. That controller sequencing does not synchronize application data between replicas.
 
 StatefulSet does not automatically make a database replicated, consistent or highly available. The application must implement those capabilities. By default, persistent claims are retained when a StatefulSet is deleted or scaled down; retention policy can alter that behavior. In this lab, namespace cleanup removes the namespaced claims.
 
@@ -404,7 +404,16 @@ StatefulSet does not automatically make a database replicated, consistent or hig
 
 A DaemonSet runs one Pod on each eligible node. Eligibility depends on node selectors, affinity, taints and tolerations. You do not scale it with a desired replicas field.
 
-The lab has two nodes, but ordinary application Pods cannot normally schedule onto its tainted control-plane node. To demonstrate two DaemonSet instances, the lab explicitly tolerates the control-plane NoSchedule taint. A toleration permits placement; it does not force placement or select a node.
+The lab has two nodes, but ordinary application Pods cannot normally schedule onto its tainted control-plane node. To demonstrate two DaemonSet instances, the lab explicitly tolerates the control-plane NoSchedule taint. A toleration permits placement; it does not force placement or select a node. Put it under the DaemonSet's `spec.template.spec`:
+
+```yaml
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+```
+
+`Exists` matches that key regardless of its value. The effect matches the scheduling taint the lab asks you to tolerate.
 
 Typical DaemonSets provide node-level logging, monitoring or networking. For a harmless lab example, each instance sleeps. Compare desiredNumberScheduled, currentNumberScheduled and numberReady when diagnosing coverage. A healthy instance on one node does not prove every required node is covered.
 
@@ -429,13 +438,13 @@ kubectl -n workloads-lab create cronjob heartbeat --image=busybox:1.36 \
   --schedule='*/5 * * * *' -- echo heartbeat
 ```
 
-Suspending a CronJob prevents new scheduled Jobs; it does not stop existing Jobs. The lab starts its CronJob suspended to avoid time-dependent background work. You can still create a manual Job from the template to test execution immediately.
+Suspending a CronJob prevents new scheduled Jobs; it does not stop existing Jobs. The lab starts its CronJob suspended to avoid time-dependent background work. You can still create a manual Job from the template to test execution immediately: `kubectl -n workloads-lab create job heartbeat-check --from=cronjob/heartbeat`. In YAML, `spec.suspend: true` belongs beside `spec.schedule`, while `spec.jobTemplate.spec.template.spec` contains `restartPolicy` and `containers` for each run.
 
 Concurrency and history settings belong to the CronJob; completion, parallelism and retry settings belong inside its Job template. Keep those nesting levels straight when editing YAML.
 
 ## Bare Pods and exam decisions
 
-A bare Pod is appropriate for a direct Pod task or a temporary experiment. Its kubelet may restart containers, but no workload controller replaces the Pod after deletion. A Pod phase, a container restart policy and a controller replacement policy answer different questions.
+A bare Pod is appropriate for a direct Pod task or a temporary experiment. Its kubelet may restart containers according to policy, but no workload controller replaces the Pod after deletion or reschedules that same Pod object to another node. A Pod phase, a container restart policy and a controller replacement policy answer different questions.
 
 ## Follow ownership when troubleshooting
 

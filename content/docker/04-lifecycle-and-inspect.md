@@ -31,7 +31,7 @@ answer = 0
 why = "diff reports filesystem changes relative to the image, with A, C and D markers. It is not a backup, a Dockerfile generator, or a report of changes inside independent volume storage."
 
 [[quiz]]
-q = "Which observation proves a process is healthy?"
+q = "Which observation directly tests whether the application serves the expected request?"
 choices = ["The container state is running", "`docker ps` shows the port as published", "The restart count stays at zero", "A successful application-level request matching the expected behavior"]
 answer = 3
 why = "Running means the main process exists. It does not prove that a dependency works or the application can serve requests; verify application behavior separately."
@@ -109,7 +109,7 @@ task = "Stop **dojo-life** with up to **10 seconds** of grace. Its handler shoul
 hints = ["docker stop sends TERM unless the image or command overrides the stop signal.", "Inspect .State.Status and .State.ExitCode after stopping."]
 solution = '''
 ```bash
-docker stop --time 10 dojo-life
+docker stop --timeout 10 dojo-life
 docker inspect -f '{{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' dojo-life
 docker logs --tail 5 dojo-life
 ```
@@ -130,7 +130,7 @@ contains = "TERM received"
 [[lab.steps]]
 title = "Resume with a deliberate restart policy"
 task = "Change **dojo-life** to restart policy **unless-stopped**, then start it again. Keep the existing report available inside the container. Inspect recent events with a bounded query."
-hints = ["docker update --restart unless-stopped changes this policy on the existing object.", "docker events --since 5m --until now is a bounded history query."]
+hints = ["docker update --restart unless-stopped changes this policy on the existing object.", "docker events --since 5m --until 0s is a bounded history query; 0s resolves to the current time."]
 solution = '''
 ```bash
 docker update --restart unless-stopped dojo-life
@@ -191,9 +191,9 @@ Exec-form startup makes the application the main process:
 ENTRYPOINT ["python", "/app/server.py"]
 ```
 
-A shell-form command instead introduces `/bin/sh -c`. Unless that shell forwards signals or replaces itself, the application may not receive the stop request. A wrapper should end with `exec application arguments` when the wrapper has completed its setup. The lab script is intentionally a supervisor-like shell with an explicit TERM trap, so its shutdown is observable.
+A shell-form command instead introduces `/bin/sh -c`. Unless that shell forwards signals or replaces itself, the application may not receive the stop request. A wrapper should end with `exec application arguments` when the wrapper has completed its setup. The lab script is intentionally a supervisor-like shell with an explicit TERM trap, so its shutdown is observable. Use `docker create --name dojo-life --restart no alpine:3.20 sh /worker.sh` to define it without starting. Then `docker cp worker.sh dojo-life:/worker.sh` copies the local script into that object, and `docker start dojo-life` launches it. Copying through the API avoids needing a bind-mount path on an SSH server.
 
-`docker stop --time 10 dojo-life` requests termination, waits up to ten seconds, and then uses SIGKILL if needed. SIGKILL cannot be caught to flush data. The image's `STOPSIGNAL` or an explicit stop-signal setting can change the initial signal; never assume every image uses TERM. `docker kill` defaults to KILL and is a different operational choice.
+`docker stop --timeout 10 dojo-life` requests termination, waits up to ten seconds, and then uses SIGKILL if needed. SIGKILL cannot be caught to flush data. The image's `STOPSIGNAL` or an explicit stop-signal setting can change the initial signal; never assume every image uses TERM. `docker kill` defaults to KILL and is a different operational choice.
 
 ## Recovery is a policy, not a repair
 
@@ -234,7 +234,7 @@ docker inspect -f '{{index .Config.Labels "dojo.lesson"}}' dojo-life
 
 `docker stats --no-stream dojo-life` takes one resource sample. It is useful for orientation but not proof of a sustained trend, and its memory display accounts for cache differently across platforms. Avoid leaving a streaming command running inside a grading solution.
 
-`docker events` reports lifecycle events such as start, die and stop. Bound both the time range and the container filter; otherwise it remains open waiting for future events. Event history is not a durable audit archive, so absence from recent history is not proof that an old action never happened.
+`docker events` reports lifecycle events such as start, die and stop. Use a past or current `--until` timestamp as well as a container filter; `--since` alone still follows future events. For example, `--until 0s` resolves to the current time, and the lab uses an explicit UTC timestamp. Event history is not a durable audit archive, so absence from recent history is not proof that an old action never happened.
 
 `docker diff dojo-life` marks added, changed and deleted filesystem paths with A, C and D. Volume content is separate from the image writable layer. `docker cp dojo-life:/tmp/report.txt report.txt` copies a file out, including from a stopped container. Unlike a host bind mount, this works through the engine API even when the daemon runs over SSH. These tools recover evidence; they do not convert manual edits into a reproducible image build.
 

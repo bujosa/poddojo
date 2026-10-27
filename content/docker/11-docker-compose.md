@@ -192,7 +192,7 @@ timeout = 90
 [[lab.steps]]
 title = "Exercise the counter and preserve its data"
 task = "Request **/** at least twice so the counter reaches **2 or more**. Force-recreate **web** and **redis** without removing their volume, then confirm **/value** still reports at least 2. Use ps and logs to inspect this project."
-hints = ["/ increments the counter; /value only reads it.", "Redis uses append-only persistence; flush it before deliberately recreating the server."]
+hints = ["/ increments the counter; /value only reads it.", "Redis uses append-only persistence. SAVE creates an additional RDB snapshot; orderly recreation lets Redis flush its append-only log."]
 solution = '''```bash
 curl -fsS "http://$PODDOJO_HOST:18100/"
 curl -fsS "http://$PODDOJO_HOST:18100/"
@@ -362,7 +362,7 @@ This is startup coordination, not continuous dependency orchestration. If Redis 
 
 ## Environment files have two different jobs
 
-The automatically read `.env` file is normally a source for **Compose interpolation**, such as `${COUNTER_LABEL:-dojo-counter}`. It does not inject every variable into every container by itself. A service's `env_file: [app.env]` explicitly populates that container's environment. Explicit `environment` entries can override values from `env_file`.
+The automatically read `.env` file is normally a source for **Compose interpolation**, such as `${COUNTER_LABEL:-dojo-counter}`. It does not inject every variable into every container by itself. A service's `env_file: [app.env]` explicitly populates that container's environment. Explicit `environment` entries override values from `env_file`. For interpolation, an exported shell variable takes precedence over the same key in `.env`, so keep `COUNTER_LABEL` unset in your shell when using the supplied lab default.
 
 | Mechanism | Consumer | Lab example |
 |---|---|---|
@@ -379,7 +379,7 @@ Use `config` to understand the final model, but remember resolved output can rev
 
 The counter's `/` route increments Redis state. `/value` only reads it; `/health` probes connectivity without changing the counter. This distinction matters for monitoring: a readiness test should not accidentally create business transactions. A database health check can be read-only even though a normal application endpoint changes state.
 
-Recreating web should preserve the counter because state lives in Redis, not the Python process. Recreating Redis should preserve it because its data lives on the named volume. Persistence still has a durability policy: an abrupt failure can lose writes not yet flushed. The lab requests `SAVE` before a deliberate recreation and uses append-only persistence; a mounted directory alone does not configure database durability.
+Recreating web should preserve the counter because state lives in Redis, not the Python process. Recreating Redis should preserve it because its data lives on the named volume. Persistence still has a durability policy: an abrupt failure can lose writes not yet flushed. The lab requests `SAVE`, a synchronous RDB snapshot, before recreation. This is not an AOF flush command: with append-only persistence enabled, Redis normally reloads the AOF, and orderly shutdown flushes that log. A mounted directory alone does not configure database durability. The snapshot command is `docker compose -p dojo-compose -f compose.yaml exec -T redis redis-cli SAVE`; it blocks this tiny Redis instance briefly, so do not generalize it into a production backup policy.
 
 ## Profiles and replicas express optional work
 

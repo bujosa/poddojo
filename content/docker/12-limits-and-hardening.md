@@ -20,7 +20,7 @@ why = "137 is conventionally 128 plus signal 9. A forced kill can produce it too
 
 [[quiz]]
 q = "What can still be writable with --read-only?"
-choices = ["Nothing, including every mount", "Explicit writable mounts such as a tmpfs at /tmp", "The container's writable layer, but not its mounts", "Only /etc and /var, which Docker keeps writable"]
+choices = ["Nothing, including every mount", "Explicit writable mounts such as a tmpfs at /tmp", "The container's writable layer, but not its mounts", "Only paths declared by VOLUME in the image"]
 answer = 1
 why = "The flag protects the root filesystem. Separate writable volumes and tmpfs mounts can still provide intentionally limited write locations."
 
@@ -31,8 +31,8 @@ answer = 2
 why = "allowPrivilegeEscalation controls the Linux no_new_privs mechanism. It is separate from choosing a non-root UID and dropping capabilities; privileged containers and CAP_SYS_ADMIN have special implications."
 
 [[quiz]]
-q = "Is --pids-limit directly configured by a standard Pod container resources.limits.pids field?"
-choices = ["Yes, with an integer", "No; kubelet/node PID management is separate from normal container CPU/memory resource fields", "Yes, but only in limits, not in requests", "No; it maps to a pids default in a LimitRange"]
+q = "Which Kubernetes control can enforce a Pod process-count limit comparable to Docker's --pids-limit?"
+choices = ["Container resources.limits.cpu", "The kubelet Pod PID limit configured on the node", "A namespace ResourceQuota for count/pods", "Container resources.limits.ephemeral-storage"]
 answer = 1
 why = "The standard per-container resource list has no ordinary pids limit equivalent. Node administrators can configure Pod PID limits through kubelet; a CKAD task should not invent an unsupported YAML field."
 
@@ -135,7 +135,7 @@ docker stats --no-stream dojo-limits-app
 docker inspect -f '{{json .HostConfig}}' dojo-limits-app
 ```
 
-Configuration inspection proves a requested ceiling, while statistics show present usage. A sleeping process using little CPU does not prove a CPU ceiling is configured. Our lab checks both the intended configuration and the live process without intentionally exhausting a shared host.
+Configuration inspection shows the requested ceiling, while statistics show present usage. Effective enforcement also requires kernel and daemon support; heed Docker warnings about unsupported controls, especially with rootless engines. A sleeping process using little CPU does not prove a CPU ceiling is configured. Our lab checks both the intended configuration and the live process without intentionally exhausting a shared host.
 
 ## Read OOM evidence precisely
 
@@ -167,7 +167,7 @@ docker run -d --name dojo-hardened --user 10001:10001 --read-only \
   alpine:3.20 sleep 3600
 ```
 
-The sticky, writable `/tmp` mode allows the numeric user to create scratch files. tmpfs data disappears on stop and consumes memory; its size limit and the memory ceiling must make sense together. A read-only root is also useful operationally: unexpected writes fail near their cause instead of silently modifying a container that will later be replaced.
+`tmpfs-mode=1777` gives everyone write and traversal access while the sticky bit restricts who may remove another user's files. This lets the numeric user create scratch files without owning the mount root. tmpfs data disappears on stop and consumes memory; its size limit and the memory ceiling must make sense together. A read-only root is also useful operationally: unexpected writes fail near their cause instead of silently modifying a container that will later be replaced.
 
 ## Capabilities and privilege escalation
 

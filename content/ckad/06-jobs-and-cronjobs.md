@@ -41,7 +41,7 @@ answer = 2
 why = "The policy coordinates a CronJob's scheduled executions. Manual Jobs and other CronJobs are outside that coordination."
 
 [[quiz]]
-q = "What is true when restartPolicy is Never?"
+q = "For a Job without container-level restart overrides, what does Pod restartPolicy Never mean?"
 choices = [
   "No Job retries can happen",
   "A failed container stays stopped in its Pod; the Job may create another Pod",
@@ -235,7 +235,7 @@ solution = '''
 kubectl -n jobs-lab patch cronjob heartbeat --type=merge -p '{"spec":{"suspend":false}}'
 ```
 
-Unsuspending permits future scheduled Jobs. It leaves the already completed manual test unchanged and retains the configured concurrency policy.
+Unsuspending permits scheduling, including a missed run still eligible within startingDeadlineSeconds. It leaves the completed manual test unchanged and retains the configured concurrency policy.
 '''
 
 [[lab.steps.checks]]
@@ -306,9 +306,9 @@ Jobs allow Pod restartPolicy Never or OnFailure. With Never, a failed container 
 | activeDeadlineSeconds | Job | Bound total active duration |
 | ttlSecondsAfterFinished | Finished Job | Delay automatic cleanup after success or failure |
 
-Never often makes debugging clearer because each failed attempt remains as a separate Pod. With OnFailure, inspect previous container logs for earlier crashes. Retry accounting can include container restarts, so backoffLimit should not be interpreted as an exact promise about how many Pod objects you will see.
+For these non-indexed Jobs, `backoffLimit` defaults to 6 if omitted; the lab sets it explicitly. `Never` often makes debugging clearer because each failed attempt remains as a separate Pod. With OnFailure, inspect previous container logs for earlier crashes. Retry accounting can include container restarts, so backoffLimit should not be interpreted as an exact promise about how many Pod objects you will see.
 
-When a Job reaches its active deadline, Kubernetes terminates active work and marks the Job failed with DeadlineExceeded. A deadline can stop a Job before its retry budget is exhausted. It includes time the Job spends active, not just useful CPU work. Set it generously enough for normal scheduling and startup.
+When a Job reaches its active deadline, Kubernetes terminates active work and marks the Job failed with DeadlineExceeded. A deadline can stop a Job before its retry budget is exhausted. It includes time the Job spends active, not just useful CPU work. The final `Failed` or `Complete` condition waits for all Job Pods to terminate, so shutdown grace can delay that condition beyond the deadline itself. Set it generously enough for normal scheduling and startup.
 
 TTL is a cleanup control, not an execution timeout. It starts after the Job finishes and permits the TTL controller to delete the Job and its dependents. A very short TTL can erase logs and status before you inspect or grade them. This lab uses an hour.
 
@@ -335,7 +335,7 @@ minute  hour  day-of-month  month  day-of-week
 0       2     *             *      *          daily at 02:00
 ```
 
-Quote schedules in YAML because an asterisk has YAML syntax meaning. Use spec.timeZone, such as Etc/UTC, to make the intended timezone explicit. Do not embed a timezone prefix into the schedule string.
+Quote schedules in YAML because an asterisk has YAML syntax meaning. Use `spec.timeZone`, such as `Etc/UTC`, to make the intended timezone explicit. If omitted, the controller interprets the schedule in its own local timezone. Do not embed a timezone prefix into the schedule string.
 
 ```yaml
 apiVersion: batch/v1
@@ -366,9 +366,9 @@ Notice the nesting: CronJob spec contains jobTemplate.spec, which contains templ
 
 ## Concurrency, history and suspension
 
-Allow permits overlapping scheduled Jobs. Forbid skips a new scheduled execution when the same CronJob's earlier Job is still active. Replace terminates the current scheduled Job and replaces it. These policies do not coordinate independent CronJobs or prevent you from manually creating overlapping Jobs.
+`Allow`, the default concurrency policy, permits overlapping scheduled Jobs. Forbid skips a new scheduled execution when the same CronJob's earlier Job is still active. Replace terminates the current scheduled Job and replaces it. These policies do not coordinate independent CronJobs or prevent you from manually creating overlapping Jobs.
 
-History limits retain a number of finished successful or failed Jobs. TTL is time-based cleanup and can remove a Job before a history limit would. Neither is a durable audit archive.
+History limits retain a number of finished successful or failed Jobs; the defaults are 3 successful and 1 failed Job. TTL is time-based cleanup and can remove a Job before a history limit would. Neither is a durable audit archive.
 
 Suspend prevents future scheduled execution; already running Jobs continue. Unsuspending can make missed executions eligible, subject to startingDeadlineSeconds and controller rules. That field limits how late a scheduled start may be, whereas activeDeadlineSeconds limits a Job's duration after it starts.
 

@@ -251,7 +251,7 @@ securityContext:
     drop: ["ALL"]
 ```
 
-`privileged: true` removes major isolation protections and grants extensive host-level access. It is not a reasonable repair for an application permission error. It also interacts with other controls: privileged execution or powerful capabilities can defeat assumptions behind privilege-escalation restrictions. Keep privileged mode disabled for ordinary application workloads.
+`privileged: true` removes major isolation protections and grants extensive host-level access. It is not a reasonable repair for an application permission error. `allowPrivilegeEscalation: false` cannot be combined with privileged execution or the `SYS_ADMIN` capability. Leaving privilege escalation unset defaults it to true, so set false explicitly. Keep privileged mode disabled for ordinary application workloads.
 
 ## Read-only root, explicit writable storage
 
@@ -270,11 +270,22 @@ Mount an `emptyDir` at `/tmp`, `/work`, or another path the actual application n
 
 `seccompProfile.type: RuntimeDefault` asks the runtime to apply its default system-call filtering profile. The exact allowed set is runtime-dependent. It is preferable to silently leaving seccomp unconfined, but it does not substitute for dropping capabilities, using a non-root identity, or limiting writable storage. `Localhost` profiles require files installed on the node; do not assume they exist during the exam.
 
+For a common Pod default, add this to `spec.securityContext`, alongside the identity fields:
+
+```yaml
+seccompProfile:
+  type: RuntimeDefault
+```
+
+Add `readOnlyRootFilesystem: true` to the container's securityContext. To draft a Pod before inserting these fields, use `kubectl -n security-lab run hardened --image=busybox:1.36 --restart=Never --dry-run=client -o yaml --command -- sleep 3600`. The generator prints a skeleton; it does not supply the hardening for you.
+
 For Linux containers, `/proc/1/status` exposes useful evidence: `NoNewPrivs: 1`, `Seccomp: 2` for filtering mode, and an all-zero `CapEff` for no effective capabilities. These observations complement API inspection. A field in accepted YAML states intent; runtime evidence checks that the resulting process has the intended restrictions. Read mount flags from `/proc/mounts` rather than performing a write in an automated read-only grading check.
 
 ## Restricted is a policy profile, not a magic field
 
-The Pod Security Standards define Privileged, Baseline and Restricted profiles. Pod Security Admission can enforce a profile using namespace labels. For Linux workloads, Restricted includes non-root execution, disabling privilege escalation, an approved seccomp profile, dropping all capabilities, and allowing only `NET_BIND_SERVICE` to be added back. It also constrains volume types, host access and other security-sensitive fields. Init and ephemeral containers matter too.
+The Pod Security Standards define Privileged, Baseline and Restricted profiles. Pod Security Admission can enforce a profile using namespace labels. For Linux Pods sharing the host user namespace, as in this lab, Restricted includes non-root execution, disabling privilege escalation, an approved seccomp profile, dropping all capabilities, and allowing only `NET_BIND_SERVICE` to be added back. It also constrains volume types and host access. Init and ephemeral containers matter too.
+
+Pods opting into a separate user namespace with `spec.hostUsers: false` have relaxed `runAsUser` and `runAsNonRoot` admission checks: container UID 0 is mapped to an unprivileged host UID. That exception requires runtime support and does not remove the other Restricted controls. See [user namespaces](https://kubernetes.io/docs/concepts/workloads/pods/user-namespaces/#integration-with-pod-security-admission-checks) and the [security-context guide](https://kubernetes.io/docs/tasks/configure-pod-container/security-context/).
 
 A read-only root filesystem is additional hardening; Restricted does not universally require it. An `emptyDir` is compatible with Restricted. Policy admission checks the manifest and does not guarantee the process will start: a compliant non-root process can still fail because a file is inaccessible. Label changes do not evict existing Pods, so test compliance by creating a new workload after enabling enforcement.
 

@@ -235,7 +235,7 @@ This distinction applies even when everything physically runs on one laptop. On 
 
 ## Build a small, inspectable application
 
-The lab supplies an app directory with a Dockerfile and greeting.txt. Its web server returns a static versioned greeting. The base image has an explicit tag rather than an unspecified moving default.
+The lab supplies an app directory with a Dockerfile and greeting.txt. Its web server returns a static versioned greeting. `ARG VERSION` supplies build-time input and `LABEL io.poddojo.version=$VERSION` records it as image metadata; it does not change the greeting file. For release 1.1, edit `app/greeting.txt` as well as changing the build argument. The base image has an explicit tag rather than an unspecified moving default.
 
 ```dockerfile
 FROM nginx:1.27-alpine
@@ -283,7 +283,7 @@ IfNotPresent allows the node to use the image loaded into its store. Without an 
 
 | Policy | Node behavior | Useful situation |
 |---|---|---|
-| IfNotPresent | Uses a local image if available; otherwise pulls | Loaded development images, immutable version tags |
+| IfNotPresent | Uses a local image if available; otherwise pulls | Loaded development images, digest-pinned images |
 | Always | Resolves the image through the registry on each container start; cached layers can still be reused | Registry-backed mutable tags |
 | Never | Uses local images only and fails if absent | Strictly preloaded environments |
 
@@ -314,7 +314,7 @@ kubectl -n images-lab rollout status deployment/greeter --timeout=120s
 kubectl -n images-lab get pods -l app=greeter -o wide
 ```
 
-Changing the image triggers a Deployment rollout. Pushing new bytes to a tag does not itself change the Pod template or restart running containers. A new tag makes the intended change explicit and avoids relying on a stale local cache.
+Changing the image triggers a Deployment rollout. Pushing new bytes to a tag does not itself change the Pod template or restart running containers. A new tag makes the intended change explicit and avoids relying on a stale local cache, provided you do not overwrite that new tag with different builds. Version-looking tags are still mutable; a verified digest pins content.
 
 Readiness is necessary but does not prove the release contains the right application bytes. In this lab, inspect the served index file in a new container. In a production application, a version endpoint or a real request is a better behavioral signal than image metadata alone.
 

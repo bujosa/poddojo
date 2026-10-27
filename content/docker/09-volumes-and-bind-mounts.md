@@ -19,8 +19,8 @@ answer = 1
 why = "Named volumes have their own lifecycle. Removing a container removes its writable layer, while the named volume remains available for a replacement container."
 
 [[quiz]]
-q = "Two containers mount one volume, and the second uses readonly. What is protected?"
-choices = ["The entire volume from every writer", "Only reads by the first container", "Writes through the second container mount", "Only the files the second container created"]
+q = "Two containers mount one volume; only the second uses readonly. Which writes does that option prevent?"
+choices = ["Writes through every container mounting that volume", "Writes through the first container mount", "Writes through the second container mount", "Writes after the second container has been removed"]
 answer = 2
 why = "Read-only is a property of that mount. Another container with a writable mount can still change the shared data, and readers may see those changes."
 
@@ -100,7 +100,7 @@ timeout = 60
 
 ## Decide how long the data must live
 
-A container's writable layer belongs to that container. Restarting the same container usually preserves the layer, which can hide a bad storage design during development. Removing and replacing the container removes that layer. An application image should be replaceable without destroying business data, so put durable state on storage with an independent lifecycle.
+A container's writable layer belongs to that container. Restarting the same container preserves its writable layer, which can hide a bad storage design during development. Removing and replacing the container removes that layer. An application image should be replaceable without destroying business data, so put durable state on storage with an independent lifecycle.
 
 A mount makes another filesystem visible at a path inside the container. The application continues using ordinary file operations; it does not need to know that `/data` is a Docker volume. Mounting storage does not copy every future write into the image. A new image build will not contain the database that happened to run beside it.
 
@@ -142,7 +142,7 @@ An anonymous volume has a generated name rather than a human-selected one. For e
 
 An ordinary container removal may leave anonymous volumes behind. `--rm` removes the container's associated anonymous volumes on exit, while named volumes remain. Anonymous volumes can be reused by their generated names, but named volumes are easier to inspect, document and clean up deliberately. This lab uses named storage throughout so no random resource needs broad cleanup.
 
-A further surprise: mounting over existing image files hides those files. With an empty named volume, Docker normally copies existing files at the target into the volume on first attachment. Use `volume-nocopy` when you specifically do not want that initialization. A bind mount does not perform the same copy-up. Avoid diagnosing a hidden image directory as a failed image build.
+A further surprise: mounting over existing image files hides those files. With an empty volume, named or anonymous, Docker normally copies existing files at the target into the volume on attachment. A nonempty volume instead presents its existing contents. Use `volume-nocopy` when you specifically do not want that initialization. A bind mount does not perform the same copy-up. Avoid diagnosing a hidden image directory as a failed image build.
 
 ## Bind mounts belong to the daemon machine
 
@@ -179,7 +179,7 @@ docker run -d --name dojo-volume-scratch --read-only \
   alpine:3.20 sleep 3600
 ```
 
-The size is an upper bound, not an allocation made immediately at startup. tmpfs consumes memory resources; depending on host configuration, pages can reach swap. Do not equate “memory-backed” with a universal guarantee that sensitive bytes can never touch disk. It is unsuitable for data that must survive restarts. Bound its size and the container's memory use together.
+The size is an upper bound in bytes, not an allocation made immediately at startup: 16 MiB is `16 × 1024 × 1024 = 16777216`. To initialize a file there, run a quoted `sh -c` script that writes the file and then uses `exec sleep 3600`; the shell is replaced by the long-lived process. tmpfs consumes memory resources; depending on host configuration, pages can reach swap. Do not equate “memory-backed” with a universal guarantee that sensitive bytes can never touch disk. It is unsuitable for data that must survive restarts. Bound its size and the container's memory use together.
 
 ## Why this matters for Kubernetes
 

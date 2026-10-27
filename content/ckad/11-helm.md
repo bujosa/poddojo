@@ -213,7 +213,7 @@ timeout = 120
 
 [[lab.steps.checks]]
 name = "no release history is retained"
-run = '''helm list --namespace helm-lab --all -q --filter '^dojo-web$'; kubectl -n helm-lab get secrets -l owner=helm,name=dojo-web -o name'''
+run = '''helm list --namespace helm-lab -q --filter '^dojo-web$'; kubectl -n helm-lab get secrets -l owner=helm,name=dojo-web -o name'''
 equals = ""
 
 [[lab.steps.negatives]]
@@ -246,8 +246,11 @@ Helm is a client and release manager, not an application runtime. After Helm cre
 > **Helm 3 or Helm 4?** Both are in use. Helm 4 lists releases in **every** state by default and
 > removed `--all`; Helm 3 showed only deployed and failed releases unless you passed `--all`. In both,
 > `--deployed`, `--failed`, `--pending`, `--superseded`, `--uninstalled` and `--uninstalling` filter
-> by state. Install, upgrade, rollback, uninstall, `--set`, `-f` and `--namespace` work the same.
-> Check the exam environment's version with `helm version` before relying on a flag.
+> by state. The commands below target Helm 4. `--wait` alone selects its watcher strategy; Helm 3
+> used a boolean wait flag with different wait internals. Helm 4 also uses server-side apply by
+> default for new releases. Check `helm version` before relying on version-specific behavior.
+> See the Helm 4 [list](https://helm.sh/docs/helm/helm_list/) and
+> [install](https://helm.sh/docs/helm/helm_install/) references for these differences.
 
 ## Know the chart directory
 
@@ -342,7 +345,7 @@ Helm revision numbers do not equal Deployment rollout revision numbers. A Helm u
 
 `helm rollback dojo-web 1 --namespace helm-lab --wait --timeout 120s` restores the configuration associated with release revision 1 and creates a new current release revision. Inspect `helm history` to see that progression. Rollback does not restore database data, external side effects, or resources deliberately excluded from ordinary Helm lifecycle handling.
 
-`helm uninstall dojo-web --namespace helm-lab --wait` removes the release and its managed resources. By default release history is removed; `--keep-history` preserves records and changes what appears with `helm list --all`. Charts may contain keep annotations, hooks, or CRDs with distinct lifecycle behavior. Read the chart before assuming uninstall deletes everything it ever touched.
+`helm uninstall dojo-web --namespace helm-lab --wait` removes the release and its managed resources. By default release history is removed; `--keep-history` preserves records and leaves an uninstalled release visible to Helm 4's default `helm list`, or to `helm list --uninstalled`. Helm 3 needed `--all` or `--uninstalled` to include that state. Charts may contain keep annotations, hooks, or CRDs with distinct lifecycle behavior. Read the chart before assuming uninstall deletes everything it ever touched.
 
 ## Repositories and exam tips
 

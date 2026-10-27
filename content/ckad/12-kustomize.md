@@ -372,7 +372,7 @@ images:
   newTag: 1.27-alpine
 ```
 
-`namespace` assigns namespaced output resources; it does not create a Namespace unless you include one. The lab setup creates its namespaces idempotently. Give each environment its own namespace: the overlays share the base's `app: dojo-web` selector, so a dev Service in the same namespace as the prod Pods would send traffic to production too (prefixes rename objects, not the labels their selectors match). A namespace transformer also does not turn a ClusterRole into a namespaced object. Know each resource's scope before applying a large build.
+The `kustomize.config.k8s.io/v1beta1` version identifies this local build format, not a deprecated Kubernetes workload API. `namespace` assigns namespaced output resources; it does not create a Namespace unless you include one. The lab setup creates its namespaces idempotently. Give each environment its own namespace: the overlays share the base's `app: dojo-web` selector, so a dev Service in the same namespace as the prod Pods would send traffic to production too (prefixes rename objects, not the labels their selectors match). A namespace transformer also does not turn a ClusterRole into a namespaced object. Know each resource's scope before applying a large build.
 
 Render before applying:
 
@@ -449,7 +449,7 @@ patches:
           memory: 16Mi
 ```
 
-`add`, `replace`, `remove`, and `test` operate on JSON Pointer paths. A parent path must exist, and `replace` requires an existing target. A numeric list index is positional: adding another container before index zero changes what the patch touches. Strategic merge by name is often safer for container edits. Escape `/` as `~1` and `~` as `~0` inside JSON Pointer keys, especially annotation names.
+`add`, `replace`, `remove`, and `test` operate on JSON Pointer paths. A parent path must exist, and `replace` requires an existing target. JSON Patch `add` on an existing object member replaces its value rather than merging it: adding `resources` can discard limits already present. This lab's base has no `resources` field, so adding the complete map is intentional. A numeric list index is positional: adding another container before index zero changes what the patch touches. Strategic merge by name is often safer for container edits. Escape `/` as `~1` and `~` as `~0` inside JSON Pointer keys, especially annotation names.
 
 ## Generators make configuration changes visible
 
@@ -466,9 +466,9 @@ secretGenerator:
   - TOKEN=practice-only
 ```
 
-By default a content hash is appended to generated names. The base Deployment references `dojo-settings`, and Kustomize rewrites that reference to the generated transformed name. Changing MODE changes the ConfigMap name, which changes the Deployment's Pod template and starts a rollout. Environment variables in already running containers do not change merely because another ConfigMap was created.
+By default a content hash is appended to generated names. The base uses `envFrom.configMapRef` for settings and `env.valueFrom.secretKeyRef` for its practice token. These feed container environment variables when the process starts. The base Deployment references `dojo-settings`, and Kustomize rewrites that reference to the generated transformed name. Changing MODE changes the ConfigMap name, which changes the Deployment's Pod template and starts a rollout. Environment variables in already running containers do not change merely because another ConfigMap was created.
 
-An overlay can set `behavior: merge` for an existing generator name to override selected literals. The production overlay therefore keeps MODE=production while the base's development setting changes. `behavior: replace` replaces the generator's content instead. Inspect output to distinguish these behaviors from patching an already generated API object.
+An overlay can set `behavior: merge` for an existing generator name to override selected literals. The production overlay therefore keeps MODE=production while the base's development setting changes. To perform the lab's one-line edit portably, write `sed 's/MODE=development/MODE=learning/' base/kustomization.yaml > base/kustomization.next`, then rename the temporary file over the original. Avoid `sed ... >` the same input file: the shell truncates it before sed reads it. `behavior: replace` replaces the generator's content instead. Inspect output to distinguish these behaviors from patching an already generated API object.
 
 Secret generation encodes data; it does not encrypt source files or rendered output. Do not disable the name hash just to make checks easier. Checks should follow live references, not assume a particular hash string. Ordinary `apply -k` does not automatically delete old hashed objects, so plan cleanup explicitly. This lab deletes only its isolated namespace when reset.
 

@@ -31,10 +31,10 @@ answer = 1
 why = "A quick final pass can catch incomplete rollouts, typoed names and tasks applied to the wrong namespace. The clock continues running, so reserve that time deliberately."
 
 [[quiz]]
-q = "Which terminal paste shortcut is normally used in the exam Linux remote desktop?"
-choices = ["Command+V in every application", "Ctrl+Shift+V in the terminal", "Ctrl+V in the terminal", "Right-click and Paste only"]
+q = "Which keyboard shortcut pastes into the terminal in the exam Linux remote desktop?"
+choices = ["Command+V", "Ctrl+Shift+V", "Ctrl+V", "Shift+Insert"]
 answer = 1
-why = "The Linux terminal normally uses Ctrl+Shift+C and Ctrl+Shift+V; other desktop applications use Ctrl+C and Ctrl+V. Practice the provided desktop, since host clipboard behavior and key mappings can differ."
+why = "The Linux terminal uses Ctrl+Shift+C and Ctrl+Shift+V; other desktop applications use Ctrl+C and Ctrl+V. The exam desktop prohibits the Insert key. The terminal also supports right-click Copy/Paste, but that is not a keyboard shortcut."
 
 [[quiz]]
 q = "What should you trust for exam rules shortly before the appointment?"
@@ -45,7 +45,7 @@ why = "Versions, delivery details, permitted resources and retake terms can chan
 
 ## Train execution, not recognition
 
-The CKAD is an online, remotely proctored performance exam delivered through PSI. You solve approximately 15–20 command-line tasks in two hours using a remote desktop. The pass mark is 66%, and the standard exam purchase includes one free retake, subject to eligibility and scheduling terms. These are planning facts, not permanent promises: check the [official CKAD page](https://training.linuxfoundation.org/certification/certified-kubernetes-application-developer-ckad/), [candidate handbook](https://docs.linuxfoundation.org/tc-docs/certification/lf-handbook2), and [exam FAQ](https://docs.linuxfoundation.org/tc-docs/certification/faq-cka-ckad-cks) before booking and again before exam day.
+The CKAD is an online, remotely proctored performance-based exam delivered through PSI's Secure Browser. You solve command-line tasks on several Kubernetes clusters in **two hours** using a remote Linux desktop. The passing score is **66%**, and the standard exam purchase includes **one free retake**, subject to eligibility and scheduling terms. It also includes **killer.sh simulator sessions**, accessed through the Linux Foundation preparation checklist; single-attempt products can have different inclusions. Check the [official CKAD page](https://training.linuxfoundation.org/certification/certified-kubernetes-application-developer-ckad/), [candidate handbook](https://docs.linuxfoundation.org/tc-docs/certification/lf-handbook2), and [exam FAQ](https://docs.linuxfoundation.org/tc-docs/certification/faq-cka-ckad-cks) before booking and again before exam day.
 
 Your job is to produce working resource state. Recognizing which answer looks plausible is not enough. Practice turning a written requirement into commands, YAML and a short verification sequence without opening a worked solution. A mock score is useful feedback, but repeated practice against a memorized task is weaker evidence than solving a fresh variation.
 
@@ -55,7 +55,7 @@ Expect tasks across several cluster environments. Follow the target instructions
 
 The following is an **exam-only illustration**, not a PodDojo lab procedure. In PodDojo, the application supplies its protected kubeconfig; never switch or modify that configuration. In the real exam, if a task explicitly supplies a context, select that supplied context first:
 
-```bash
+```text
 alias k=kubectl
 kubectl config use-context TASK_CONTEXT
 kubectl config set-context --current --namespace=TASK_NAMESPACE
@@ -86,7 +86,7 @@ At the start, scan the task list and identify high-weight work you can complete 
 | Second pass | 35 minutes | Resolve flagged and longer tasks |
 | Final review | 15 minutes | Verify outcomes and recover omissions |
 
-Sixteen tasks across 120 minutes average 7.5 minutes each **including review**. With a review reserve, many first-pass tasks need to take roughly four to six minutes. Use weights as a guide, not a guarantee of difficulty. If you cannot name your next useful diagnostic action, flag the task and move on. Leave valid partial work when appropriate, but do not assume any particular partial-credit algorithm.
+The table is a suggested practice budget, not an official allocation or a promised task count. With a review reserve, many first-pass tasks need to take roughly four to six minutes. Use weights as a guide, not a guarantee of difficulty. If you cannot name your next useful diagnostic action, flag the task and move on. Leave valid partial work when appropriate, but do not assume any particular partial-credit algorithm.
 
 ## Generate the boring parts
 
@@ -130,13 +130,15 @@ Watch for false confidence: Running is not Ready; a saved manifest is not an app
 
 ## Use documentation as a tool
 
-The permitted resources include kubernetes.io/docs through the exam environment's browser. Consult the [current allowed-resources rules](https://docs.linuxfoundation.org/tc-docs/certification/certification-resources-allowed) for exact scope and exceptions. Do not assume an external search result, forum or AI assistant is allowed because a documentation page links to it. Learn the official page titles for probes, NetworkPolicies, volumes and Ingress so you can reach a relevant example quickly.
+Use the browser **inside the exam VM** for the allowed documentation: [kubernetes.io/docs](https://kubernetes.io/docs/), [kubernetes.io/blog](https://kubernetes.io/blog/), and [helm.sh/docs](https://helm.sh/docs/). The task's Quick Reference box may authorize task-specific documentation too. The [current allowed-resources rules](https://docs.linuxfoundation.org/tc-docs/certification/certification-resources-allowed) define the exact scope. Searching the Kubernetes documentation is permitted; opening external search results is not. An external forum or AI assistant does not become allowed merely because a documentation page links to it.
+
+Learn page titles for probes, NetworkPolicies, volumes and Ingress so you can find an example quickly. In this curriculum, use Helm 4 documentation and `helm COMMAND --help` to check flags rather than assuming an older Helm example is current. The exam's installed tool versions and task instructions remain authoritative.
 
 ## The final week with PodDojo
 
 Spend the first two days repairing your weakest domains with lesson labs and quizzes. On day three, take **CKAD Mock Exam 1** in PodDojo with the full 120-minute timer and no solutions. Record where time went and which checks failed. On day four, redo those skills from a blank namespace, changing names or values to defeat memorization.
 
-Use day five for another available PodDojo mock, or reset Mock Exam 1 after reviewing the gaps. Aim for a comfortable margin above 66% while verifying each task. On day six, rehearse imperative generation, YAML editing, documentation navigation and the remote environment checklist. On the final day, review short notes, confirm identification and system requirements, and rest. Avoid replacing deliberate practice with last-minute feature collecting.
+Use day five for an included killer.sh session to rehearse the remote environment, then review its explanations and repeat weak skills. Check activation and access terms before starting a session. Another PodDojo mock provides additional timed practice. Aim for a comfortable margin above 66% while verifying each task. On day six, rehearse imperative generation, YAML editing, documentation navigation and the remote environment checklist. On the final day, review short notes, confirm identification and system requirements, and rest. Personal notes are preparation material, not authorized reference material during the exam.
 
 ## Exam tips
 

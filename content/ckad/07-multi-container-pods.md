@@ -24,7 +24,7 @@ answer = 1
 why = "Ordinary init containers establish prerequisites in sequence. They do not need to remain running alongside the application."
 
 [[quiz]]
-q = "How is a native sidecar expressed?"
+q = "Which setting makes an init container a native sidecar?"
 choices = ["An init container with a startupProbe", "restartPolicy: Always on an initContainers entry", "An ordinary container listed first in containers", "restartPolicy: Never on the Pod"]
 answer = 1
 why = "A restartable init container is the native sidecar mechanism. Its container-level policy is distinct from the Pod policy."
@@ -47,9 +47,9 @@ answer = 1
 why = "A Job needs its work Pod to finish. Native sidecars have special lifecycle handling so they do not block completion of the ordinary work containers."
 
 [[quiz]]
-q = "Why might a native sidecar need a startup probe?"
+q = "Which startup-ordering role can a native sidecar's startup probe provide?"
 choices = [
-  "To restart it when it stops responding",
+  "To keep checking responsiveness throughout the Pod lifetime",
   "To delay subsequent startup until its prerequisite is established",
   "To remove the Pod from Service endpoints until ready",
   "To let the Job finish when the sidecar exits",
@@ -313,12 +313,12 @@ equals = "job-complete"
 
 ## A Pod is a deliberate coupling boundary
 
-Multi-container Pods solve a specific problem: some processes need to live together. They share scheduling, one Pod IP, localhost, and any volumes explicitly mounted into multiple containers. They are replaced together when the Pod is replaced.
+Multi-container Pods solve a specific problem: some processes need to live together. They share scheduling, the Pod's IP addresses, localhost, and any volumes explicitly mounted into multiple containers. A dual-stack Pod can have both IPv4 and IPv6; containers still share one network namespace. They are replaced together when the Pod is replaced.
 
 This is useful for a helper that prepares files, transforms logs or proxies traffic for one application instance. It is less useful for components that need independent scaling or upgrades. A web frontend and a shared database usually belong in separate workloads.
 
 ```text
-Pod network namespace: one IP
+Pod network namespace: shared IP addresses
 ┌─────────────────────────────────────────────┐
 │ app :8080 ← localhost → helper :9000         │
 │     /data ─── shared emptyDir ─── /work      │
@@ -402,6 +402,8 @@ Native sidecars have lifecycle support that classic helpers lack. They continue 
 | Init container | Complete a prerequisite before the application | Produce static files or wait for a dependency |
 
 Classic sidecars live in the containers list. The order of that list is not a dependency ordering guarantee. If one needs another's data, implement a bounded wait or use initialization to establish prerequisites.
+
+The adapter lab's `sed 's/^temperature=/temperature_celsius /' /data/raw > /data/metrics` replaces a line prefix and writes the converted format; quote the expression so the shell passes it intact to sed.
 
 An ambassador can let the application always call localhost:9000 while proxy configuration selects the real remote endpoint. It does not give each container a private port range: the Pod shares a network namespace, so two processes cannot both bind the same address and port.
 

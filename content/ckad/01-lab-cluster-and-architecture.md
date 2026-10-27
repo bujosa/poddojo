@@ -114,7 +114,7 @@ kubectl -n arch-lab wait --for=condition=Ready pod/explorer --timeout=120s
 kubectl -n arch-lab get pod explorer -o wide
 ```
 
-The create request records intent; the Ready wait confirms the kubelet has started a usable container.
+The create request records intent; the Ready wait observes the Pod's readiness condition. With no readiness probe, this confirms container startup rather than testing nginx's HTTP response.
 '''
 
 [[lab.steps.checks]]
@@ -188,7 +188,7 @@ kubectl api-resources
 kubectl get pods -n kube-system
 ```
 
-These commands inspect rather than modify the cluster. Wide output adds useful columns such as node addresses or Pod placement. API discovery lists resource names, short names, API groups, and whether a resource is namespaced. Use discovery when you remember the concept but not the spelling.
+These commands inspect rather than modify the cluster. Wide output adds useful columns such as node addresses or Pod placement. API discovery lists resource names, short names, API groups, and whether a resource is namespaced. Use discovery when you remember the concept but not the spelling. `kubectl get nodes -o name` and `kubectl get namespaces -o name` emit one resource identity per line; append `> nodes.txt` or `> namespaces.txt` to save each inventory. Similarly, redirect `kubectl api-resources` into `resources.txt`. Redirection writes files in the lab folder without changing cluster objects.
 
 Nodes are cluster-scoped. Pods are namespaced. A request for Pods in arch-lab limits the result to one namespace, whereas adding a namespace to a node request does not make nodes belong to it. Namespaces separate names and policy scope; they are not, by themselves, a complete security or network isolation boundary.
 
@@ -236,7 +236,7 @@ Apply a saved manifest with kubectl apply. Reapplying the same desired state is 
 
 A useful bridge is generation: add **--dry-run=client -o yaml** to kubectl run. Client dry-run prints an object without creating it. Add the namespace before saving or applying so the file documents where it belongs.
 
-Labels are queryable identifiers such as purpose=architecture. Annotations hold descriptive metadata. Neither changes an application's behavior by magic: a controller or tool must interpret a value for it to have further effect.
+Labels are queryable identifiers such as `purpose=architecture`. Set this lesson's label with `kubectl label namespace arch-lab purpose=architecture --overwrite`; the overwrite flag allows replacing an existing value. Read it back with `kubectl get namespace arch-lab -o yaml`. Annotations hold descriptive metadata. Neither changes an application's behavior by magic: a controller or tool must interpret a value for it to have further effect.
 
 ## Exam tips
 

@@ -137,7 +137,7 @@ docker inspect -f '{{.Config.Image}}' dojo-engine
 docker inspect -f '{{.State.Status}}' dojo-engine
 ```
 
-The JSON includes configuration, runtime state and network information. A Go template extracts an individual field, which is more reliable in a script than visually reading columns designed for humans.
+The JSON includes configuration, runtime state and network information. A Go template extracts an individual field, which is more reliable in a script than visually reading columns designed for humans. For a label key containing a dot, use `{{index .Config.Labels "dojo.lesson"}}`: `index` treats the complete key as one map lookup.
 
 ## Establish which engine answered
 
@@ -152,7 +152,7 @@ docker version --format '{{.Server.Version}}'
 
 `version` separates Client and Server information, including their Engine API versions. The CLI negotiates a supported API version with the server; different client and server release numbers do not automatically mean failure. If only the Client section succeeds, investigate the connection before the workload.
 
-`info` describes the selected daemon: its name, storage backend, architecture, operating system and resource capacity. On a Mac, the client runs on macOS while the server usually reports Linux because Docker Desktop runs containers inside a Linux VM. On an SSH context, the CPU and memory figures belong to the remote engine. The lab records stable identity fields instead of hard-coding your machine's hostname or processor type.
+`info` describes the selected daemon: its name, storage backend, architecture, operating system and resource capacity. On a Mac, the client runs on macOS while the server usually reports Linux because Docker Desktop runs containers inside a Linux VM. On an SSH context, the CPU and memory figures belong to the remote engine. The lab records stable identity fields instead of hard-coding your machine's hostname or processor type. Append `> engine-facts.txt` to the formatted info command and `> engine-version.txt` to the server-version command to save them. Shell redirection writes these files in the local lab folder even when the facts come from a remote daemon.
 
 ## Contexts are named connections
 
@@ -201,7 +201,7 @@ docker run -d --name dojo-engine --label dojo.lesson=engine alpine:3.20 sleep 36
 docker ps --filter label=dojo.lesson=engine --format '{{.Names}}'
 ```
 
-Container labels do not change an image's labels, and existing container labels cannot be edited in place. Recreate a disposable container when its creation metadata must change. Always target exact lesson resources when removing anything; a label filter is for discovery, not permission to delete other learners' work.
+For the exact lesson container, combine `--filter name=^/dojo-engine$` with the label filter. The anchors prevent a substring match from selecting a similarly named object. Container labels do not change an image's labels, and existing container labels cannot be edited in place. Recreate a disposable container when its creation metadata must change. Always target exact lesson resources when removing anything; a label filter is for discovery, not permission to delete other learners' work.
 
 ## Why this matters for Kubernetes
 

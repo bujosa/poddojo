@@ -26,7 +26,7 @@ answer = 1
 why = "Use an additional stable identity such as track to separate Deployment selectors. The Service may intentionally select the wider app label to include both groups."
 
 [[quiz]]
-q = "Where should you verify the current ready Service backends?"
+q = "Which API objects directly record a Service's backend addresses and readiness conditions?"
 choices = ["The Service's spec.clusterIP", "kubectl get pods -l app=dojo-web", "EndpointSlices selected by kubernetes.io/service-name", "The Deployment's status.availableReplicas"]
 answer = 2
 why = "EndpointSlices record endpoint addresses, target Pods, and readiness conditions. Compare these with Pod track/version labels; selector intent alone does not prove backends are ready."
@@ -303,7 +303,7 @@ kubectl -n delivery-lab patch service dojo-web --type=json \
 
 Notice the full selector replacement. A merge patch containing just `app` retains any existing `track` key unless you remove it explicitly. That would silently keep routing to a single lane. JSON Patch `replace` is a useful time saver when the whole map should change.
 
-Session affinity, persistent HTTP connections, client behavior, topology preferences, and unequal readiness can all skew the observed split. Four stable replicas configured does not imply four ready stable endpoints. If one stable Pod becomes unready, the eligible population becomes 3:1. If the canary becomes unready, ordinary Service routing excludes it. For exact weighted routing, use an appropriate gateway, ingress, service mesh, or progressive-delivery controller; do not invent a weight field on a core Service.
+Session affinity, persistent HTTP connections, client behavior, topology preferences, and unequal readiness can all skew the observed split. Four stable replicas configured does not imply four ready stable endpoints. If one stable Pod becomes unready, the eligible population becomes 3:1. If the canary becomes unready, ordinary new-connection routing excludes it after endpoint updates propagate. This assumes the default `publishNotReadyAddresses: false`; existing connections may still continue. For exact weighted routing, use an appropriate gateway, ingress, service mesh, or progressive-delivery controller; do not invent a weight field on a core Service.
 
 ## Verify the backend set
 
@@ -316,7 +316,7 @@ kubectl -n delivery-lab get endpointslices \
   -l kubernetes.io/service-name=dojo-web -o yaml
 ```
 
-EndpointSlices use the discovery API and are the current place to examine Service backends. Read each endpoint's `conditions.ready` and `targetRef.name`; correlate target Pods with their track labels. A Pod existing in `Running` phase does not prove it is Ready. Also inspect Service `port` versus `targetPort`: selecting the right Pod with the wrong destination port still produces failed connections.
+EndpointSlices use `discovery.k8s.io/v1` and are the current place to examine Service backends. The `kubernetes.io/service-name` label identifies their Service within the namespace; several slices may belong to one Service, so inspect all matching slices rather than only the first. Read each endpoint's `conditions.ready` and `targetRef.name`; correlate target Pods with their track labels. A Pod existing in `Running` phase does not prove it is Ready. Also inspect Service `port` versus `targetPort`: selecting the right Pod with the wrong destination port still produces failed connections.
 
 Endpoint membership proves the configured eligible split, not successful application responses or a measured traffic percentage. A production canary also needs error rate, latency, and business correctness signals over a useful observation window. A handful of curl responses is a smoke test, not a statistically strong acceptance criterion.
 

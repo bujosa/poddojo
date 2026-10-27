@@ -4,14 +4,14 @@ title = "Build an application with a Dockerfile"
 module = "images"
 minutes = 45
 needs = "docker"
-objectives = ["Write a reproducible Dockerfile from a pinned base image", "Separate build context, image configuration and runtime overrides", "Combine ENTRYPOINT and CMD while preserving signal delivery", "Build and verify a non-root HTTP service"]
+objectives = ["Write an inspectable Dockerfile from a versioned base image", "Separate build context, image configuration and runtime overrides", "Combine ENTRYPOINT and CMD while preserving signal delivery", "Build and verify a non-root HTTP service"]
 domain = "design-build"
 
 [[quiz]]
 q = "What does EXPOSE 8080 do?"
 choices = ["Publishes host port 8080", "Changes the application listening port", "Documents the intended container port without publishing it", "Opens the port in the host firewall"]
 answer = 2
-why = "EXPOSE is metadata. The process must actually listen on that port, and Docker requires -p or another explicit publishing mechanism for host access."
+why = "EXPOSE is metadata. The process must actually listen on that port, and a published host port requires -p, -P or another explicit publishing mechanism. A host or peer that can reach the container IP is a separate access path."
 
 [[quiz]]
 q = "Which input is available during build without automatically becoming a runtime environment variable?"
@@ -183,7 +183,7 @@ CMD ["app.py"]
 
 `WORKDIR /app` creates the directory if needed and sets the location for subsequent relative build instructions and the container's default working directory. It is clearer and safer than repeatedly writing `RUN cd /app && ...`, whose directory change lasts only for that instruction's shell.
 
-`USER 10001:10001` sets the runtime UID and GID for later instructions and the default process. It does not automatically transfer ownership of copied files. The lab files are readable, and the app needs no write access to its source directory. If an application writes data, prepare an appropriate writable path and ownership rather than reverting to root.
+`USER 10001:10001` sets the UID and GID for subsequent `RUN` instructions and for the default runtime process. It does not change the identity used by earlier build instructions. It does not automatically transfer ownership of copied files. The lab files are readable, and the app needs no write access to its source directory. If an application writes data, prepare an appropriate writable path and ownership rather than reverting to root.
 
 ## Know which instructions create which effects
 
@@ -236,7 +236,7 @@ docker build --build-arg APP_VERSION=1.0 -t dojo/dockerfile:v1 app
 docker run -d --name dojo-build-web -e 'GREETING=hello from runtime' -p 18081:8080 dojo/dockerfile:v1
 ```
 
-The argument selects a value while building. The label records that release value as metadata. The environment default remains available to the runtime process and can be overridden per container. An `ARG` declared before `FROM` has different scope from one declared inside a stage; redeclare it inside a stage when that stage needs it.
+The argument selects a value while building. `LABEL` stores key/value metadata on the image; `org.opencontainers.image.version` is the conventional OCI key used here to record the release value. The environment default remains available to the runtime process and can be overridden per container. An `ARG` declared before `FROM` has different scope from one declared inside a stage; redeclare it inside a stage when that stage needs it.
 
 Do not use ARG or ENV to smuggle credentials into builds. Build inputs can appear in metadata, provenance, history or generated output. Real secret handling uses a mechanism designed for temporary secret mounts, with careful attention to what the build writes.
 
