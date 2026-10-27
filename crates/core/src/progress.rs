@@ -11,6 +11,7 @@ use crate::check::CheckResult;
 use crate::content::{Catalog, Lesson};
 use crate::domains::DOMAINS;
 use crate::exam::ExamAttempt;
+use crate::review::Deck;
 
 pub const VERSION: u32 = 1;
 /// A quiz counts as passed at this share of correct answers.
@@ -73,6 +74,8 @@ pub struct Progress {
     pub active_exam: Option<ActiveExam>,
     /// Days (`YYYY-MM-DD`, local time) with any study activity, for the streak.
     pub active_days: BTreeSet<String>,
+    /// Spaced-review cards: quiz questions and mock-exam tasks.
+    pub deck: Deck,
 }
 
 /// How ready the learner is for one CKAD domain.
@@ -83,19 +86,68 @@ pub struct Readiness {
     pub weight: u32,
     pub lessons_done: usize,
     pub lessons_total: usize,
-    /// Best mock-exam score in this domain, in percent.
-    pub best_exam: Option<f32>,
+    /// This domain's score in the learner's latest fresh (first-attempt) mocks: the mean of the
+    /// last two, in percent. Retakes are left out: a retaken mock measures memory, not skill.
+    pub recent_exam: Option<f32>,
 }
 
 impl Readiness {
-    /// 0..=1: half from lessons done, half from the best exam score (lessons only until an exam).
-    pub fn score(&self) -> f32 {
-        let lessons = if self.lessons_total == 0 { 0.0 } else { self.lessons_done as f32 / self.lessons_total as f32 };
-        match self.best_exam {
-            Some(e) => 0.5 * lessons + 0.5 * (e / 100.0).clamp(0.0, 1.0),
-            None => lessons,
+    /// Share of the domain's lessons completed, 0..=1.
+    pub fn coverage(&self) -> f32 {
+        if self.lessons_total == 0 { 0.0 } else { self.lessons_done as f32 / self.lessons_total as f32 }
+    }
+
+    /// Weak: scored under the pass mark in recent fresh mocks.
+    pub fn weak(&self) -> bool {
+        self.recent_exam.is_some_and(|e| e < PASS_MARK)
+    }
+}
+
+/// The CKAD pass mark, in percent.
+pub const PASS_MARK: f32 = 66.0;
+/// The recent fresh-mock average that, with full coverage and no weak domain, says "book it".
+pub const READY_MARK: f32 = 80.0;
+
+/// The honest answer to "would I pass?", from evidence rather than a blended number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum Verdict {
+    /// Less than 60% of the CKAD curriculum done and no mock yet.
+    KeepStudying,
+    /// Most of the curriculum done but no timed mock yet: no evidence about exam performance.
+    TakeAMock,
+    /// Recent fresh mocks under the pass mark.
+    NotYet,
+    /// Passing recent mocks, but without margin (under 80%, a weak domain, gaps or one mock only).
+    Close,
+    /// Two or more fresh mocks averaging 80%+, no weak domain and the curriculum done.
+    Ready,
+}
+
+impl Verdict {
+    pub fn title(self) -> &'static str {
+        match self {
+            Verdict::KeepStudying => "Keep studying",
+            Verdict::TakeAMock => "Time for a timed mock",
+            Verdict::NotYet => "Not yet",
+            Verdict::Close => "Close",
+            Verdict::Ready => "Ready to book",
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ExamReadiness {
+    pub verdict: Verdict,
+    /// Weighted share of the CKAD lessons completed, 0..=100.
+    pub coverage: f32,
+    /// Fresh (first) attempts of each mock, oldest first: (exam id, percent, finished at).
+    pub fresh: Vec<(String, f32, i64)>,
+    /// Mean of the last two fresh attempts, in percent.
+    pub recent: Option<f32>,
+    /// Domain ids under the pass mark in recent fresh mocks, biggest exam weight first.
+    pub weak: Vec<String>,
+    /// What to do next, in one sentence.
+    pub advice: String,
 }
 
 impl Progress {
@@ -169,10 +221,49 @@ impl Progress {
         self.refresh_completion(lesson, now);
     }
 
-    pub fn record_exam(&mut self, attempt: ExamAttempt) {
+    /// Record a finished mock. Every task joins the review deck: a task without full marks is due
+    /// for a drill right away, a solved one comes back later.
+    pub fn record_exam(&mut self, attempt: ExamAttempt, catalog: &Catalog) {
         self.touch_day();
         self.active_exam = None;
+        if let Some(exam) = catalog.exams.iter().find(|e| e.id == attempt.exam_id) {
+            for r in &attempt.tasks {
+                if let Some(task) = exam.tasks.iter().find(|t| t.id == r.id) {
+                    let solved = r.possible > 0.0 && r.earned + f32::EPSILON >= r.possible;
+                    self.deck.answer(&crate::review::task_key(exam, task), solved, attempt.finished_at);
+                }
+            }
+        }
         self.exams.push(attempt);
+    }
+
+    /// Record a lesson quiz: the best score for completion and every question for spaced review.
+    pub fn record_quiz_answers(&mut self, lesson: &Lesson, answers: &[Option<usize>], now: i64) -> QuizScore {
+        let correct = lesson.quiz.iter().zip(answers).filter(|(q, a)| **a == Some(q.answer)).count() as u32;
+        let score = QuizScore { correct, total: lesson.quiz.len() as u32 };
+        self.deck.record_quiz(lesson, answers, now);
+        self.record_quiz(lesson, score, now);
+        score
+    }
+
+    /// Record one spaced-review answer (a quiz card or an exam-task drill).
+    pub fn record_review(&mut self, key: &str, correct: bool, now: i64) {
+        self.deck.answer(key, correct, now);
+        self.touch_day();
+    }
+
+    /// First attempts of each mock, oldest first. Later attempts of the same mock are retakes.
+    pub fn fresh_attempts(&self) -> Vec<&ExamAttempt> {
+        let mut seen = BTreeSet::new();
+        let mut fresh: Vec<&ExamAttempt> = Vec::new();
+        let mut all: Vec<&ExamAttempt> = self.exams.iter().collect();
+        all.sort_by_key(|a| a.finished_at);
+        for a in all {
+            if seen.insert(a.exam_id.as_str()) {
+                fresh.push(a);
+            }
+        }
+        fresh
     }
 
     /// Clear a lesson's lab progress (after "Reset lab").
@@ -278,33 +369,101 @@ impl Progress {
     }
 
     pub fn readiness(&self, catalog: &Catalog) -> Vec<Readiness> {
+        let fresh = self.fresh_attempts();
+        let recent: Vec<&ExamAttempt> = fresh.iter().rev().take(2).copied().collect();
         DOMAINS
             .iter()
             .map(|d| {
                 let lessons: Vec<&Lesson> =
                     catalog.lessons.values().filter(|l| l.domain.as_deref() == Some(d.id)).collect();
-                let best_exam = self
-                    .exams
+                let scores: Vec<f32> = recent
                     .iter()
                     .filter_map(|a| a.domains.get(d.id))
                     .filter(|s| s.possible > 0.0)
                     .map(|s| s.percent())
-                    .fold(None, |acc: Option<f32>, p| Some(acc.map_or(p, |a| a.max(p))));
+                    .collect();
                 Readiness {
                     domain: d.id.to_string(),
                     title: d.title.to_string(),
                     weight: d.weight,
                     lessons_done: lessons.iter().filter(|l| self.is_done(l)).count(),
                     lessons_total: lessons.len(),
-                    best_exam,
+                    recent_exam: (!scores.is_empty()).then(|| scores.iter().sum::<f32>() / scores.len() as f32),
                 }
             })
             .collect()
     }
 
-    /// Weighted CKAD readiness, 0..=100.
-    pub fn overall_readiness(&self, catalog: &Catalog) -> f32 {
-        self.readiness(catalog).iter().map(|r| r.score() * r.weight as f32).sum::<f32>()
+    /// Weighted share of the CKAD curriculum completed, 0..=100.
+    pub fn coverage(&self, catalog: &Catalog) -> f32 {
+        self.readiness(catalog).iter().map(|r| r.coverage() * r.weight as f32).sum()
+    }
+
+    /// Would the learner pass today? Coverage says what was studied; only fresh timed mocks say how
+    /// it goes under exam conditions, so the verdict leans on them and says what is missing.
+    pub fn exam_readiness(&self, catalog: &Catalog) -> ExamReadiness {
+        let domains = self.readiness(catalog);
+        let coverage: f32 = domains.iter().map(|r| r.coverage() * r.weight as f32).sum();
+        let fresh: Vec<(String, f32, i64)> =
+            self.fresh_attempts().iter().map(|a| (a.exam_id.clone(), a.percent, a.finished_at)).collect();
+        let last: Vec<f32> = fresh.iter().rev().take(2).map(|f| f.1).collect();
+        let recent = (!last.is_empty()).then(|| last.iter().sum::<f32>() / last.len() as f32);
+        let mut weak: Vec<&Readiness> = domains.iter().filter(|r| r.weak()).collect();
+        weak.sort_by_key(|r| std::cmp::Reverse(r.weight));
+        let weak_titles = weak
+            .iter()
+            .map(|r| DOMAINS.iter().find(|d| d.id == r.domain).map_or(r.title.as_str(), |d| d.short))
+            .collect::<Vec<_>>()
+            .join(" and ");
+        let untaken = catalog.exams.len().saturating_sub(fresh.len());
+        let (verdict, advice) = match recent {
+            None if coverage < 60.0 => (
+                Verdict::KeepStudying,
+                "Work through the CKAD lessons and their labs; take the first timed mock at about 60%.".to_string(),
+            ),
+            None => (
+                Verdict::TakeAMock,
+                "Take a timed mock exam: only a fresh, timed attempt shows how you do under exam conditions."
+                    .to_string(),
+            ),
+            Some(s) if s < PASS_MARK => (
+                Verdict::NotYet,
+                if weak.is_empty() {
+                    "Redo the labs of the tasks you missed (Review › Drills), then take another fresh mock.".to_string()
+                } else {
+                    format!(
+                        "Focus on {weak_titles}: drill the missed tasks and redo those labs, then take a fresh mock."
+                    )
+                },
+            ),
+            Some(s) if s >= READY_MARK && fresh.len() >= 2 && weak.is_empty() && coverage >= 90.0 => (
+                Verdict::Ready,
+                "Book the exam, and do the two killer.sh sessions that come with it in the last week.".to_string(),
+            ),
+            Some(_) => (
+                Verdict::Close,
+                if !weak.is_empty() {
+                    format!("Passing, but {weak_titles} is under the pass mark: drill it before the next mock.")
+                } else if coverage < 90.0 {
+                    "Passing mocks: finish the remaining CKAD lessons to close the gaps.".to_string()
+                } else if fresh.len() < 2 {
+                    "One passing mock: confirm it with another fresh mock.".to_string()
+                } else if untaken > 0 {
+                    "Passing, but without margin: aim for 80%+ on a fresh mock.".to_string()
+                } else {
+                    "Passing without margin and no fresh mock left: drill every missed task until it is quick."
+                        .to_string()
+                },
+            ),
+        };
+        ExamReadiness {
+            verdict,
+            coverage,
+            fresh,
+            recent,
+            weak: weak.iter().map(|r| r.domain.clone()).collect(),
+            advice,
+        }
     }
 
     /// Consecutive days with activity, ending today or yesterday.
@@ -440,6 +599,112 @@ mod tests {
         assert_eq!(p.streak(d("2026-10-24")), 3);
         assert_eq!(p.streak(d("2026-10-25")), 3);
         assert_eq!(p.streak(d("2026-10-27")), 0);
+    }
+
+    fn attempt(exam: &str, percent: f32, finished_at: i64, domain: &str) -> ExamAttempt {
+        let mut domains = BTreeMap::new();
+        domains.insert(domain.to_string(), crate::exam::DomainScore { earned: percent, possible: 100.0 });
+        ExamAttempt { exam_id: exam.into(), percent, finished_at, domains, ..Default::default() }
+    }
+
+    #[test]
+    fn readiness_counts_fresh_mocks_only() {
+        let mut c = Catalog::default();
+        for e in ["m1", "m2", "m3"] {
+            c.exams.push(crate::content::Exam {
+                id: e.into(),
+                title: e.into(),
+                summary: String::new(),
+                minutes: 120,
+                pass_percent: 66,
+                requires: vec![],
+                setup: vec![],
+                cleanup: vec![],
+                tasks: vec![],
+            });
+        }
+        let mut p = Progress::default();
+        assert_eq!(p.exam_readiness(&c).verdict, Verdict::KeepStudying);
+        p.exams.push(attempt("m1", 50.0, 1, "deployment"));
+        p.exams.push(attempt("m1", 95.0, 2, "deployment"));
+        let r = p.exam_readiness(&c);
+        assert_eq!(r.verdict, Verdict::NotYet, "a retake must not count");
+        assert_eq!(r.recent, Some(50.0));
+        assert_eq!(r.weak, vec!["deployment".to_string()]);
+        p.exams.push(attempt("m2", 90.0, 3, "deployment"));
+        let r = p.exam_readiness(&c);
+        assert_eq!(r.recent, Some(70.0));
+        assert_eq!(r.verdict, Verdict::Close);
+        p.exams.push(attempt("m3", 90.0, 4, "deployment"));
+        let r = p.exam_readiness(&c);
+        assert_eq!(r.recent, Some(90.0));
+        assert!(r.weak.is_empty());
+        assert_eq!(r.verdict, Verdict::Close, "no lessons done: not ready to book yet");
+    }
+
+    #[test]
+    fn missed_exam_tasks_become_due_drills() {
+        let task = |id: &str| crate::content::ExamTask {
+            id: id.into(),
+            domain: "deployment".into(),
+            weight: 10,
+            title: id.into(),
+            namespace: None,
+            task: String::new(),
+            setup: vec![],
+            solution: String::new(),
+            checks: vec![Check::default()],
+            negatives: vec![],
+            alternatives: vec![],
+        };
+        let mut c = Catalog::default();
+        c.exams.push(crate::content::Exam {
+            id: "m1".into(),
+            title: "M1".into(),
+            summary: String::new(),
+            minutes: 120,
+            pass_percent: 66,
+            requires: vec![],
+            setup: vec![],
+            cleanup: vec![],
+            tasks: vec![task("q1"), task("q2")],
+        });
+        let mut a = attempt("m1", 50.0, 100, "deployment");
+        a.tasks = vec![
+            crate::exam::TaskResult {
+                id: "q1".into(),
+                domain: "deployment".into(),
+                earned: 10.0,
+                possible: 10.0,
+                checks: vec![],
+            },
+            crate::exam::TaskResult {
+                id: "q2".into(),
+                domain: "deployment".into(),
+                earned: 5.0,
+                possible: 10.0,
+                checks: vec![],
+            },
+        ];
+        let mut p = Progress::default();
+        p.record_exam(a, &c);
+        let due = p.deck.due(&c, 100 + 3600);
+        assert_eq!(due.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), vec!["t:m1/q2"]);
+        assert_eq!(p.deck.stats(&c, 100 + 3600).due_tasks, 1);
+    }
+
+    #[test]
+    fn quiz_answers_feed_the_deck() {
+        let l = lesson("a", true, 0);
+        let mut c = Catalog::default();
+        c.lessons.insert("a".into(), l.clone());
+        let mut p = Progress::default();
+        let score = p.record_quiz_answers(&l, &[Some(1)], 0);
+        assert_eq!(score, QuizScore { correct: 0, total: 1 });
+        assert_eq!(p.deck.stats(&c, crate::review::RELEARN_SECS).due_questions, 1);
+        let key = p.deck.due(&c, crate::review::RELEARN_SECS)[0].0.clone();
+        p.record_review(&key, true, crate::review::RELEARN_SECS);
+        assert_eq!(p.deck.stats(&c, crate::review::RELEARN_SECS).due_questions, 0);
     }
 
     #[test]

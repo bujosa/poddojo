@@ -7,6 +7,7 @@ pub mod content;
 pub mod domains;
 pub mod exam;
 pub mod progress;
+pub mod review;
 
 mod embedded {
     include!(concat!(env!("OUT_DIR"), "/embedded.rs"));
@@ -14,11 +15,16 @@ mod embedded {
 
 pub use check::{Check, CheckResult, CommandOutput};
 pub use content::{
-    Case, Catalog, ContentError, Exam, ExamTask, Lab, LabStep, Lesson, Module, Needs, QuizQuestion, Requirement, Track,
+    Case, Catalog, ContentError, Exam, ExamTask, Lab, LabStep, Lesson, Module, Needs, QuizQuestion, RefPage,
+    Requirement, Track,
 };
 pub use domains::{CKAD_CURRICULUM_VERSION, DOMAINS, Domain};
 pub use exam::{DomainScore, ExamAttempt, TaskResult};
-pub use progress::{ActiveExam, LessonProgress, LessonStatus, Progress, QuizScore, Readiness};
+pub use progress::{
+    ActiveExam, ExamReadiness, LessonProgress, LessonStatus, PASS_MARK, Progress, QuizScore, READY_MARK, Readiness,
+    Verdict,
+};
+pub use review::{Card, Deck, DeckStats, Item};
 
 /// The curriculum compiled into this binary (`content/`).
 pub fn embedded_files() -> &'static [(&'static str, &'static str)] {
