@@ -270,10 +270,27 @@ pub fn is_shell(lang: &str) -> bool {
     matches!(lang, "bash" | "sh" | "shell" | "console" | "zsh")
 }
 
+/// The document's sections (`##` and `###`), for an "On this page" list.
+pub fn headings(md: &str) -> Vec<(u8, String)> {
+    parse(md)
+        .into_iter()
+        .filter_map(|b| match b {
+            Block::Heading(level, spans) if (2..=3).contains(&level) => Some((level, plain(&spans))),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Draw `md`. `id` keeps widget ids unique when several documents are on screen.
 pub fn show(ui: &mut egui::Ui, t: &Tokens, md: &str, id: &str) -> Option<Action> {
+    show_scrolled(ui, t, md, id, None)
+}
+
+/// Like [`show`], scrolling the `scroll_to`-th section (as listed by [`headings`]) into view.
+pub fn show_scrolled(ui: &mut egui::Ui, t: &Tokens, md: &str, id: &str, scroll_to: Option<usize>) -> Option<Action> {
     let mut action = None;
     let width = ui.available_width();
+    let mut section = 0usize;
     for (i, block) in parse(md).iter().enumerate() {
         match block {
             Block::Heading(level, spans) => {
@@ -288,11 +305,21 @@ pub fn show(ui: &mut egui::Ui, t: &Tokens, md: &str, id: &str) -> Option<Action>
                 for s in &mut j.sections {
                     s.format.color = strong(t);
                 }
-                ui.label(j);
-                ui.add_space(2.0);
+                let resp = ui.label(j);
+                if (2..=3).contains(level) {
+                    if scroll_to == Some(section) {
+                        resp.scroll_to_me(Some(egui::Align::TOP));
+                    }
+                    section += 1;
+                }
+                ui.add_space(4.0);
             }
             Block::Para { spans, indent, bullet, quote } => {
-                let j = job(spans, t, 15.0, false, (width - *indent as f32 * 18.0 - 24.0).max(120.0));
+                let mut j = job(spans, t, 16.0, false, (width - *indent as f32 * 18.0 - 24.0).max(120.0));
+                // Comfortable reading: 16 px text on a 25 px line.
+                for s in &mut j.sections {
+                    s.format.line_height = Some(25.0);
+                }
                 if *quote {
                     egui::Frame::new()
                         .fill(t.accent_soft.gamma_multiply(if t.dark { 0.45 } else { 0.6 }))
@@ -317,7 +344,7 @@ pub fn show(ui: &mut egui::Ui, t: &Tokens, md: &str, id: &str) -> Option<Action>
                 } else {
                     ui.label(j);
                 }
-                ui.add_space(3.0);
+                ui.add_space(6.0);
             }
             Block::Code { lang, text } => {
                 if let Some(a) = code_block(ui, t, lang, text, &format!("{id}-{i}")) {
