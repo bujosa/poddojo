@@ -420,6 +420,48 @@ pub fn code_block(ui: &mut egui::Ui, t: &Tokens, lang: &str, text: &str, id: &st
     action
 }
 
+/// Short plain text (a quiz question or answer) with inline code: `backticked` spans and command
+/// flags (`--from-file`) are set in monospace, so `--` never reads as a dash.
+pub fn inline_job(text: &str, size: f32, color: Color32, code_bg: Color32, wrap: f32) -> LayoutJob {
+    let mut job = LayoutJob::default();
+    job.wrap.max_width = wrap;
+    let normal = TextFormat { font_id: FontId::proportional(size), color, ..Default::default() };
+    let code = TextFormat { font_id: FontId::monospace(size * 0.92), color, background: code_bg, ..Default::default() };
+    for (i, part) in text.split('`').enumerate() {
+        if i % 2 == 1 {
+            job.append(part, 0.0, code.clone());
+            continue;
+        }
+        // Outside backticks: words that start with a dash and a letter are flags.
+        let mut rest = part;
+        while !rest.is_empty() {
+            let start = rest
+                .char_indices()
+                .find(|(j, c)| {
+                    *c == '-'
+                        && (*j == 0 || rest[..*j].ends_with(char::is_whitespace) || rest[..*j].ends_with('('))
+                        && rest[*j..].trim_start_matches('-').starts_with(|c: char| c.is_ascii_alphabetic())
+                })
+                .map(|(j, _)| j);
+            match start {
+                Some(j) => {
+                    job.append(&rest[..j], 0.0, normal.clone());
+                    let end = rest[j..]
+                        .find(|c: char| c.is_whitespace() || c == ',' || c == '?' || c == ')')
+                        .map_or(rest.len(), |e| j + e);
+                    job.append(&rest[j..end], 0.0, code.clone());
+                    rest = &rest[end..];
+                }
+                None => {
+                    job.append(rest, 0.0, normal.clone());
+                    rest = "";
+                }
+            }
+        }
+    }
+    job
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -465,46 +507,4 @@ mod tests {
         let b = parse("1. a\n2. b\n");
         assert!(matches!(&b[1], Block::Para { bullet: Some(x), .. } if x == "2."));
     }
-}
-
-/// Short plain text (a quiz question or answer) with inline code: `backticked` spans and command
-/// flags (`--from-file`) are set in monospace, so `--` never reads as a dash.
-pub fn inline_job(text: &str, size: f32, color: Color32, code_bg: Color32, wrap: f32) -> LayoutJob {
-    let mut job = LayoutJob::default();
-    job.wrap.max_width = wrap;
-    let normal = TextFormat { font_id: FontId::proportional(size), color, ..Default::default() };
-    let code = TextFormat { font_id: FontId::monospace(size * 0.92), color, background: code_bg, ..Default::default() };
-    for (i, part) in text.split('`').enumerate() {
-        if i % 2 == 1 {
-            job.append(part, 0.0, code.clone());
-            continue;
-        }
-        // Outside backticks: words that start with a dash and a letter are flags.
-        let mut rest = part;
-        while !rest.is_empty() {
-            let start = rest
-                .char_indices()
-                .find(|(j, c)| {
-                    *c == '-'
-                        && (*j == 0 || rest[..*j].ends_with(char::is_whitespace) || rest[..*j].ends_with('('))
-                        && rest[*j..].trim_start_matches('-').starts_with(|c: char| c.is_ascii_alphabetic())
-                })
-                .map(|(j, _)| j);
-            match start {
-                Some(j) => {
-                    job.append(&rest[..j], 0.0, normal.clone());
-                    let end = rest[j..]
-                        .find(|c: char| c.is_whitespace() || c == ',' || c == '?' || c == ')')
-                        .map_or(rest.len(), |e| j + e);
-                    job.append(&rest[j..end], 0.0, code.clone());
-                    rest = &rest[end..];
-                }
-                None => {
-                    job.append(rest, 0.0, normal.clone());
-                    rest = "";
-                }
-            }
-        }
-    }
-    job
 }
