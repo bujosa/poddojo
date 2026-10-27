@@ -19,7 +19,7 @@ answer = 1
 why = "exec requires a running container. Logs and inspection work for retained stopped containers, and inspect can explain a startup failure that produced no application log at all."
 
 [[quiz]]
-q = "nginx responds from inside the container, but the host URL fails. What do you inspect next?"
+q = "nginx answers on its container interface, but its published host URL fails. Which evidence directly tests that remaining path?"
 choices = ["The EXPOSE metadata of the image", "PortBindings, published host port and host reachability", "The container's aliases on its bridge network", "The container's healthcheck status"]
 answer = 1
 why = "An internal response proves part of the application path. The remaining path includes listener binding, publication, the selected host address and any external filtering."
@@ -204,7 +204,7 @@ Docker CLI errors also have their own codes, such as 125 for a Docker invocation
 
 `docker logs --tail 30 NAME` reads the retained container stdout/stderr stream with the configured logging support. Add `--timestamps` when ordering events matters. `--follow` is useful interactively but runs until interrupted, so use bounded output in scripted investigations. Logs do not automatically include arbitrary files written inside the container.
 
-The first broken container deliberately prints a clear error and exits. Its `on-failure:5` policy retries the same broken workload. Waiting longer does not fix its missing configuration. Recreate it with the required environment, a valid long-lived command and no retry policy hiding the outcome.
+The first broken container deliberately prints a clear error and exits. Its `on-failure:5` policy retries that same unconditional error command; merely adding an environment variable would not repair it. Replace the command as well so it checks `APP_MODE`, prints `ready: serve`, then uses `exec sleep 3600` to remain running. Waiting longer does not fix its missing configuration. Recreate it with the required environment, a valid long-lived command and no retry policy hiding the outcome.
 
 ```bash
 docker logs --tail 30 --timestamps dojo-debug-crash
@@ -245,7 +245,7 @@ A Docker health check runs a command inside the container and records its exit s
 
 The lab server listens on 80 while its probe targets 81. Disabling the probe would hide that mismatch. Correct the endpoint and verify the health status eventually becomes healthy. A standalone Docker restart policy does not restart a container merely because it is unhealthy. The main process can continue serving while the probe fails; the [Dockerfile health-check reference](https://docs.docker.com/reference/dockerfile/#healthcheck) explains the independent status.
 
-The lab checks the resulting healthy state and the live HTTP response rather than requiring a particular diagnostic client. Keep a meaningful HTTP probe configured against the requested endpoint. A successful no-op such as `true` is not a meaningful substitute for checking the application. For real applications, choose an endpoint that reflects the intended contract without causing transactions as a side effect.
+The lab checks the resulting healthy state and live HTTP response. It also runs the configured probe in a separate disposable container with nginx absent, where the probe must fail. This rejects unconditional success and `|| true` shortcuts without stopping the working server. Keep a meaningful HTTP probe configured against the requested endpoint. A successful no-op such as `true` is not a meaningful substitute for checking the application. For real applications, choose an endpoint that reflects the intended contract without causing transactions as a side effect.
 
 ## Events add chronology
 

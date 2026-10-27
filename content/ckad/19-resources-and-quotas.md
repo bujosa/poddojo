@@ -21,7 +21,7 @@ why = "1000 millicores equals one CPU. The scheduler accounts for a 250m request
 
 [[quiz]]
 q = "With only container-level resources, which Pod is Guaranteed?"
-choices = ["One container has a memory limit only", "Every container has equal CPU request/limit and equal memory request/limit", "Every container has a CPU request only", "The Pod has no resource settings"]
+choices = ["One container has a memory limit only", "Every container has positive CPU and memory requests, each equal to its corresponding limit", "Every container has a CPU request only", "The Pod has no resource settings"]
 answer = 1
 why = "For this container-level case, every container, including init containers, must meet both CPU and memory equality conditions. Other nonempty configurations are Burstable; a Pod without CPU or memory requests or limits is BestEffort. Pod-level budgets can also influence QoS in current Kubernetes."
 
@@ -32,7 +32,7 @@ answer = 2
 why = "CPU is compressible: the kernel can delay execution. Memory exhaustion may instead trigger an OOM kill. CPU throttling can still cause latency and probe failures without directly terminating the process."
 
 [[quiz]]
-q = "A quota tracks requests.cpu and requests.memory. A new Pod supplies neither, and there are no defaults. What happens?"
+q = "A quota tracks requests.cpu and requests.memory. A new Pod declares no CPU or memory resources, and no admission defaults exist. What happens?"
 choices = ["It is always BestEffort and bypasses quota", "Admission rejects it for missing resource declarations", "It is admitted and counted as zero", "The quota assigns it the namespace's average request"]
 answer = 1
 why = "Compute quota needs resource declarations to account for new Pods. Explicit requests, limit-to-request defaulting, or LimitRange defaults can supply them. A quota tracking only object counts does not impose this particular compute requirement."
@@ -274,7 +274,7 @@ CPU is compressible: the kernel can delay a process that exhausts its CPU allowa
 
 Memory cannot be handled in the same way. Exceeding a container's memory limit can lead to an out-of-memory kill. Inspect `status.containerStatuses[].lastState.terminated.reason`, restart counts and `kubectl describe pod`; `OOMKilled` is more informative than simply noticing exit code 137, which can have other causes. A restart follows the Pod's restart policy. Node pressure can also evict a Pod, which is a different mechanism from an individual container exceeding its memory limit.
 
-`kubectl top` needs a metrics API; it is not available by default in this lab. Diagnose declarations, events and termination state without assuming metrics-server exists. Resource sizing should ultimately use measurements from realistic workload behavior, not arbitrary low limits chosen only to make YAML look tidy.
+`kubectl top` needs a Metrics API provider; this lab does not install one. It may already be available if you completed the monitoring lesson. Diagnose declarations, events and termination state without assuming metrics-server exists. Resource sizing should ultimately use measurements from realistic workload behavior, not arbitrary low limits chosen only to make YAML look tidy.
 
 ## QoS is derived, not selected by a label
 
@@ -288,11 +288,11 @@ For Pods using **container-level** CPU and memory settings:
 
 CPU and memory values need not equal each other; `50m` CPU and `32Mi` memory are incomparable units. Each resource's request must equal its own limit for Guaranteed. One resource-free sidecar can change a whole Pod's class. Read the actual result with `kubectl get pod NAME -o jsonpath='{.status.qosClass}'`.
 
-Kubernetes v1.37 also supports Pod-level CPU and memory budgets through `spec.resources` when the relevant feature is available. Those Pod-level declarations take precedence in QoS derivation, so the table above is explicitly the container-only case used in this lab. Inspect both levels in an unfamiliar manifest. QoS influences behavior under resource pressure, but Guaranteed is not a promise of immunity to eviction or OOM termination.
+Kubernetes v1.37 also supports Pod-level CPU and memory budgets through `spec.resources`. The `PodLevelResources` feature is beta and enabled by default; administrators can disable it. Nonempty Pod-level resource declarations take precedence in QoS derivation, so the table above is explicitly the container-only case used in this lab. Inspect both levels in an unfamiliar manifest. QoS influences behavior under resource pressure, but Guaranteed is not a promise of immunity to eviction or OOM termination.
 
 ## LimitRange is per-object policy
 
-A namespaced LimitRange can provide default requests and limits and impose minimums, maximums or request-to-limit ratios. `type: Container` constrains containers; other types address Pods or storage claims. Defaults apply at admission to new objects, not retroactively to existing Pods. Keep one clear policy rather than relying on ambiguous interactions among several defaulting LimitRanges.
+A namespaced LimitRange can provide default requests and limits and impose minimums, maximums or limit-to-request ratios (`maxLimitRequestRatio`). `type: Container` constrains containers; `Pod` constrains Pod totals and `PersistentVolumeClaim` constrains storage claims. Container defaults use `defaultRequest` for requests and `default` for limits. Defaults apply at admission to new objects, not retroactively to existing Pods. Keep one clear policy rather than relying on ambiguous interactions among several defaulting LimitRanges.
 
 ```yaml
 apiVersion: v1
@@ -313,7 +313,7 @@ Validate defaults against their own bounds. An explicit value outside policy is 
 
 ## ResourceQuota is the namespace total
 
-ResourceQuota limits aggregate usage using `spec.hard`. Compute keys include `requests.cpu`, `requests.memory`, `limits.cpu` and `limits.memory`. Object keys include `pods`, `configmaps` and `count/deployments.apps`. A compute quota requires the tracked resource declarations on newly admitted Pods, either explicitly or through defaulting. A count-only quota does not impose CPU or memory settings.
+ResourceQuota limits aggregate usage using `spec.hard`. Compute keys include `requests.cpu`, `requests.memory`, `limits.cpu` and `limits.memory`. Object keys include `pods`, `configmaps` and `count/deployments.apps`. The `pods` key and compute totals count non-terminal Pods, including Pending; Succeeded and Failed Pods are excluded. A compute quota requires the tracked CPU or memory declarations on newly admitted Pods, either explicitly or through defaulting. A count-only quota does not impose CPU or memory settings.
 
 ```bash
 kubectl -n resources-lab create quota team-budget \
@@ -323,7 +323,7 @@ kubectl -n resources-lab describe quota team-budget
 kubectl -n resources-lab describe limitrange container-policy
 ```
 
-`describe quota` compares Used and Hard. Requested capacity, not live CPU utilization, consumes compute quota. Pending Pods can consume budget too. Quotas do not reserve node capacity: a namespace can be within its quota while a Pod remains unschedulable. Existing objects are not deleted merely because you introduce a restrictive quota; future admissions must satisfy it.
+`describe quota` compares Used and Hard. Requested capacity, not live CPU utilization, consumes request quota; declared limits consume limit quota. Pending Pods can consume budget too. Quotas do not reserve node capacity: a namespace can be within its quota while a Pod remains unschedulable. Existing objects are not deleted merely because you introduce a restrictive quota; future admissions must satisfy it. See the [ResourceQuota reference](https://kubernetes.io/docs/concepts/policy/resource-quotas/) for accounting details.
 
 Workload controllers make admission failures less obvious. A Deployment can be accepted while its ReplicaSet fails to create the requested Pods because the namespace budget is exhausted. You may see fewer Pods than the desired replica count, rather than a Pending Pod for every missing replica. Describe the Deployment and ReplicaSet and read `FailedCreate` events. Lowering a container's actual CPU consumption will not free its declared request from quota; changing the resource declaration or removing a quota-consuming workload does. A rolling update also needs room for overlapping old and new Pods, so account for surge capacity when choosing replica counts and namespace budgets.
 

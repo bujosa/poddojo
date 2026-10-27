@@ -20,7 +20,7 @@ answer = 2
 why = "The kubelet constructs the environment when starting a container. Updating a ConfigMap does not rewrite an existing process environment or change a Deployment template. Recreate the Pod, usually through a rollout, to consume the new values."
 
 [[quiz]]
-q = "Which mount does NOT receive automatic ConfigMap updates?"
+q = "For a mutable ConfigMap, which mount does NOT receive automatic updates?"
 choices = ["A directory projection", "A single file mounted using subPath", "A directory projection using items", "A readOnly directory projection"]
 answer = 1
 why = "A subPath mount binds the selected file rather than following the projection's later atomic replacements. The original file stays mounted until the Pod is recreated. Selecting files with items alone does not disable projection updates."
@@ -33,9 +33,9 @@ why = "The optional name before the equals sign chooses the ConfigMap key. File 
 
 [[quiz]]
 q = "What is a sensible way to change an immutable ConfigMap used by a Deployment?"
-choices = ["Set immutable back to false", "Patch data with --force", "Create a new named ConfigMap and update the Pod template reference", "Use kubectl edit, which bypasses the immutable flag"]
+choices = ["Set immutable back to false", "Use kubectl replace to overwrite the existing object's data", "Create a new named ConfigMap and update the Pod template reference", "Use kubectl edit, which bypasses the immutable flag"]
 answer = 2
-why = "Immutability cannot be reversed, and data cannot be changed on that object. A new versioned object plus a template change gives the Deployment an explicit rollout and leaves the old configuration available for rollback."
+why = "Immutability cannot be reversed, and neither data nor binaryData can be changed on that object. A new versioned object plus a template change triggers a rollout and leaves the old configuration available for rollback."
 
 [lab]
 summary = "Create three configuration sources, inject environments and files, then observe which consumers see an update."
@@ -248,7 +248,7 @@ kubectl -n cm-lab create configmap app-settings \
   --from-literal=MODE=training --dry-run=client -o yaml
 ```
 
-Dry-run prints a manifest without creating the object. Redirect it into a file for editing, or pipe it into `kubectl apply -f -`. An env-file is parsed as data, not executed as a shell script: avoid `export`, expansion, and shell quoting assumptions. A trailing newline in a source file is part of its value. Prefer `printf` when exact bytes matter.
+Client dry-run prints a manifest without creating the object. Redirect it into a file for editing, or pipe it into `kubectl apply -f -`. An env-file is parsed as data, not executed as a shell script: avoid `export` and expansion, and remember that quotation marks remain part of the value. Blank lines and lines starting with `#` are ignored. A trailing newline in a source file is part of its value. Prefer `printf` when exact bytes matter.
 
 ```yaml
 apiVersion: v1
@@ -303,6 +303,8 @@ volumes:
 
 The container mounts `settings` through `volumeMounts`. A directory mount at `/config` exposes `/config/settings.conf`. A mount at `/snapshot.conf` with `subPath: settings.conf` places only that file at that path, leaving neighboring image files visible. That convenience has a lifecycle cost: **subPath mounts do not receive automatic ConfigMap updates**. Normal projected ConfigMap files are read-only; if a program needs to edit configuration, copy it into a writable volume first.
 
+For the lab's second mount, use `name: settings`, `mountPath: /snapshot.conf`, `subPath: settings.conf` and `readOnly: true` in one `volumeMounts` entry. `subPath` names the projected relative path, not the original ConfigMap key. Check both paths with `kubectl exec file-reader -- cat PATH`.
+
 ## Updates have three different clocks
 
 Changing an API object, refreshing a projected file, and reloading an application are separate events. Ordinary directory projections update eventually after kubelet synchronization and its configured change-detection behavior. Do not assume an immediate refresh or grade with a fixed short sleep. Reopen the filename to read the replacement; a process holding an old file descriptor can keep reading old content.
@@ -319,5 +321,7 @@ Updating a ConfigMap does not itself change a Deployment's Pod template. For env
 ## Immutable configuration and exam tips
 
 Set top-level `immutable: true` when a configuration version should never change. You cannot turn it back off or edit its data. Publish `release-v2`, update the workload reference, and retain the previous version if rollback needs it. Avoid deleting and recreating a same-named map as a substitute: existing mounted consumers can remain attached to old content and the release history becomes ambiguous.
+
+The [ConfigMap documentation](https://kubernetes.io/docs/concepts/configuration/configmap/) covers projection timing and immutability. Keep these separate from the application's own reload mechanism.
 
 During the exam, generate YAML imperatively, then add the precise reference or mount structure. Use `kubectl explain pod.spec.containers.envFrom` and inspect the live Pod manifest when field placement is unclear. Verify both the API data and the value the process actually reads. A successful `apply` proves that the API accepted your configuration, not that the application used it.

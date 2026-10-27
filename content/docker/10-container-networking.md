@@ -38,7 +38,7 @@ cleanup = ["docker rm -f dojo-net-web dojo-net-client 2>/dev/null || true", "doc
 [[lab.steps]]
 title = "Create an application network"
 task = "Create the user-defined **bridge** network **dojo-net-front**. Inspect its driver and scope."
-hints = ["docker network create defaults to the bridge driver.", "PodDojo labs pass an explicit subnet from 10.214.0.0/16 (here 10.214.1.0/24) so they work even when Docker's automatic address pools are used up."]
+hints = ["docker network create defaults to the bridge driver.", "These labs use explicit subnets from 10.214.0.0/16 (here 10.214.1.0/24) rather than automatic pools. They still require non-overlapping network ranges on the selected machine."]
 solution = '''```bash
 docker network create --driver bridge --subnet 10.214.1.0/24 dojo-net-front
 docker network inspect dojo-net-front
@@ -124,10 +124,11 @@ Always name both endpoints when describing a connection: source namespace and de
 
 
 > **"all predefined address pools have been fully subnetted"?** Docker hands each new network a
-> subnet from a small set of default pools (172.17–31.0.0/16 and 192.168.0.0/16 cut into /20s, about
-> 31 networks). Machines with many Compose projects run out. Either remove networks you no longer
-> need (`docker network ls`, then `docker network rm NAME`), pass an explicit `--subnet` as these
-> labs do, or give the daemon bigger pools with `default-address-pools` in `daemon.json`. Kubernetes
+> subnet from finite default or administrator-configured pools. Existing networks and host routes
+> can leave no suitable automatic range. These labs pass explicit `--subnet` values, which still
+> must not overlap existing networks or routed destinations. Inspect with `docker network ls` and
+> `docker network inspect`; remove only named lesson-owned resources. Changing daemon address
+> pools is an administrator task outside this lab. Kubernetes
 > does not create a Docker bridge per application: the CNI plugin gives Pods addresses from the
 > cluster's Pod ranges, which are finite too (configured CIDRs, CNI allocation and node limits).
 
@@ -187,7 +188,7 @@ Network membership is not a full application authorization policy. Containers sh
 
 ## Host and none are different models
 
-On Linux, host networking removes the separate network namespace: the container uses host interfaces and socket ports directly. A service can conflict with an existing host listener. Port publishing flags do not provide an extra translation layer in this mode. Docker Desktop support has platform and configuration requirements, so do not assume Linux host behavior everywhere.
+On Linux, host networking removes the separate network namespace: the container uses host interfaces and socket ports directly. A service can conflict with an existing host listener. Port publishing flags do not provide an extra translation layer in this mode. Docker Desktop offers opt-in host networking from version 4.34, with layer-4 limitations and Linux-container requirements; it is not identical to Linux host-interface access. Do not assume it is enabled on every Desktop installation.
 
 With `--network none`, the container has loopback but no ordinary network interface for external connectivity. It can still perform local computation and use mounted files. It is useful for a task designed not to communicate, but it will not magically download packages or contact a registry from inside its running process. Image pulling happens through the engine before the process starts.
 

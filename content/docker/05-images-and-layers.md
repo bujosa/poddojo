@@ -169,7 +169,7 @@ Pull resolves the reference, retrieves manifests and configuration, and download
 | Identifier | Example shape | Meaning |
 |---|---|---|
 | Tag | `alpine:3.20` | A convenient, potentially mutable reference |
-| Local image ID | `sha256:…` | A content hash identifying the local image configuration |
+| Local image ID | `sha256:…` | Engine-local content ID; its representation depends on the image store |
 | Registry digest | `repository@sha256:…` | Content-addressed reference to a manifest or image index |
 | Container ID | Another hexadecimal ID | An instance, not its image |
 
@@ -180,7 +180,7 @@ docker image tag alpine:3.20 dojo/layers:source
 docker image inspect -f '{{.Id}}' dojo/layers:source
 ```
 
-The local image ID is not generally interchangeable with a registry manifest digest. A registry reference by digest makes the selected manifest immutable, but you must obtain that real digest from trusted registry metadata. Do not invent a hash or copy a digest from an unrelated platform and expect it to work.
+With classic storage drivers, the image ID hashes the image configuration. With the containerd image store, inspect can report the target manifest or index digest instead, as the [Engine implementation](https://github.com/moby/moby/blob/v28.0.0/daemon/containerd/image_inspect.go) shows. Treat `.Id` as the engine's local identity, not as a universally interchangeable registry reference. A registry reference by digest makes the selected manifest immutable, but you must obtain that real digest from trusted registry metadata. Do not invent a hash or copy a digest from an unrelated platform and expect it to work.
 
 Inspect repository digest information when available:
 
@@ -188,7 +188,7 @@ Inspect repository digest information when available:
 docker image inspect -f '{{json .RepoDigests}}' alpine:3.20
 ```
 
-Locally built or merely retagged images may not have a repository digest for your new repository. That absence does not mean their local image ID is missing.
+Repository-digest reporting also depends on the image store. A locally built or retagged image may have no digest entry for the new repository, or may show one before it has been pushed. Neither case proves that the repository actually serves those bytes; publish or explicitly pull the full reference to test availability.
 
 ## Architecture is part of the image contract
 

@@ -20,7 +20,7 @@ choices = [
   "A running image: the container and the image are the same object",
 ]
 answer = 1
-why = "Containers share the host's kernel. Namespaces give the process its own view (PIDs, network, mounts, hostname), and cgroups cap the CPU and memory it may use. There is no second kernel, which is why containers start in milliseconds."
+why = "Linux containers share their engine host's kernel. Namespaces isolate views such as PIDs, network and mounts; cgroups account for resources and enforce configured limits. No separate kernel needs to boot, but image downloads and application initialization still affect startup time."
 
 [[quiz]]
 q = "You start three containers from the image `nginx:1.27-alpine`. How many copies of the image's files are stored on disk?"
@@ -31,7 +31,7 @@ choices = [
   "Four: the image plus one per container",
 ]
 answer = 1
-why = "Image layers are read-only and shared. Each container gets its own copy-on-write layer on top, so starting more containers costs almost no extra disk."
+why = "Image layers are read-only and shared. Each container gets its own copy-on-write layer on top, so starting another container does not require another full image copy. Its writes and logs can still consume disk space."
 
 [[quiz]]
 q = "Inside a container you run `ps` and see your process as PID 1. Why?"
@@ -53,7 +53,7 @@ choices = [
   "The container is removed automatically; only its image remains",
 ]
 answer = 2
-why = "A container lives exactly as long as its main process. When it exits the container moves to `exited`; its writable layer stays until `docker rm`. Restarting only happens if you set a restart policy."
+why = "A container's running lifetime follows its main process. When it exits the container moves to `exited`; its writable layer stays until `docker rm`. Restarting only happens if you set a restart policy."
 
 [lab]
 summary = "Run your first containers on the machine you chose, look at them from the inside and the outside, and clean up."
@@ -155,10 +155,10 @@ When you run a container you are **not** booting a computer. You are starting an
 
 | Feature | What it controls | Example |
 |---|---|---|
-| **Namespaces** | What the process can *see* | its own PIDs, network interfaces, mounts, hostname, users |
+| **Namespaces** | What the process can *see* | its own PIDs, network interfaces, mounts and hostname |
 | **cgroups** (control groups) | What the process can *use* | at most 512 MiB of RAM, half a CPU |
 
-Put a process in fresh namespaces, limit it with a cgroup, give it its own root filesystem, and you have a container. That is the whole trick, and it is why containers start in milliseconds: there is no kernel to boot.
+A runtime combines namespaces, cgroups and an image-based root filesystem to run an isolated process. Cgroups account for resources; hard CPU and memory ceilings require explicit limits. User-ID isolation is a separate user-namespace option, not a default promise that container root is harmless. Containers can start quickly because no separate kernel boots, but pulling an image and initializing the application still take time.
 
 ### Containers vs virtual machines
 
@@ -208,18 +208,39 @@ A container lives **exactly as long as its main process**. `docker run alpine:3.
 ## Your first commands
 
 ```bash
-docker run alpine:3.20 echo "hello from a container"   # create + start, attached
-docker run -d --name web nginx:1.27-alpine             # detached, with a name
-docker ps                                              # running containers
-docker ps -a                                           # all containers, stopped too
-docker exec web ps                                     # a new process inside
-docker rm -f web                                       # stop and remove
+docker run --rm --name dojo-first-echo alpine:3.20 echo "hello from a container"
+docker run -d --name dojo-first-web nginx:1.27-alpine  # detached, with a name
+docker ps                                           # running containers
+docker ps -a                                        # stopped containers too
+docker exec dojo-first-web ps                       # a new process inside
+docker rm -f dojo-first-web                         # force-remove this example
 ```
 
 `docker run` = `docker pull` (if the image is missing) + `docker create` + `docker start`.
 
 > **Where do these containers run?** On the machine you chose in PodDojo's top bar. PodDojo sets `DOCKER_CONTEXT` for you, so `docker` talks to that machine's engine, whether it is Docker Desktop on this Mac or a Linux server over SSH. Next lesson explains how.
 
+## Read the launch before pressing Enter
+
+The command shape is `docker run [options] IMAGE [command and arguments]`. Options before the image configure Docker. Words after the image select the process or its arguments, subject to the image's entrypoint. For Alpine here, `uname -r` replaces its default shell command and prints the kernel release. `sleep 3600` instead keeps the main process alive for an hour without doing useful work.
+
+`--name` gives the container a handle for later commands. Names must be unique on the selected engine, including names held by stopped containers. An “already in use” error can therefore mean an earlier attempt stopped successfully; inspect that exact name before removing or reusing it.
+
+`-d` detaches the client and returns your prompt. It does not change how long the application runs: a detached command that finishes immediately still leaves an exited container. `--rm` asks Docker to remove the object after exit. Omit it when you want to inspect a one-shot task afterwards, as the first lab step requires.
+
+## Compare the two process views
+
+Once the lab's `dojo-sleeper` is running, `docker top dojo-sleeper` lists its processes from the engine host's viewpoint. `docker exec dojo-sleeper ps` starts a new `ps` process inside the container. The same `sleep` normally has a larger host PID and PID 1 inside its private PID namespace. The extra `ps` process does not replace `sleep` or create another container.
+
+PID 1 has special signal and child-process responsibilities on Linux. A real application must handle shutdown properly; later lessons cover signals and small init helpers. For now, distinguish the main process that determines running state from a diagnostic process started with exec. Exec requires the container to be running, whereas `docker inspect NAME` can also examine a retained stopped object.
+
+## Remove the object you actually mean
+
+`docker ps -a --filter name=dojo-` narrows the list to names containing that text. It is a discovery aid, not an instruction to remove every match. `docker rm dojo-hello` removes that specific stopped container; it does not remove the Alpine image or the separate sleeper. `docker rm -f NAME` also forcibly stops a running container, so use it only for the disposable object you intend to discard.
+
+For an exited command, `docker logs NAME` shows retained standard output and error, and `docker inspect -f '{{.State.ExitCode}}' NAME` reads its result. Exit zero conventionally means success. A retained object lets you ask those questions after the process ends; removing it discards that convenient evidence.
+
 ## Why this matters for Kubernetes
 
-Kubernetes never runs "VMs"; it runs these same containers, grouped in **Pods**. Everything here (one main process per container, exit means stopped, images are shared templates) carries straight over to the CKAD.
+Kubernetes asks node runtimes to run containers grouped in **Pods**. Images, process lifetimes and exit codes carry into the CKAD. Controllers can restart containers or replace Pods, so distinguish a stopped process from the desired workload that still asks for it to run.
+

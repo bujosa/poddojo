@@ -33,8 +33,8 @@ answer = 2
 why = "The TLS section references a Secret. Certificate issuance, listener configuration and public reachability require additional components; normal Ingress TLS termination does not imply encrypted backend connections."
 
 [[quiz]]
-q = "How do portable Ingress annotations behave?"
-choices = ["All controllers implement the same rewrite keys", "Annotations are controller-specific extensions", "Unknown annotations make the API reject the Ingress", "They are standardized under the networking.k8s.io prefix"]
+q = "What should you assume when copying Ingress rewrite annotations between controllers?"
+choices = ["Every controller implements the same rewrite keys", "Their meaning depends on the controller", "The API always rejects unknown annotation keys", "The networking.k8s.io prefix standardizes rewrite behavior"]
 answer = 1
 why = "The core API standardizes hosts, paths and backends. Rewrite, authentication and timeout annotations depend on the chosen controller and should not be copied across implementations blindly."
 
@@ -126,7 +126,8 @@ equals = "traefik.io/ingress-controller"
 
 [[lab.steps.checks]]
 name = "the class is not the cluster default"
-run = '''kubectl get ingressclass dojo-traefik -o name >/dev/null && kubectl get ingressclass dojo-traefik -o jsonpath='{.metadata.annotations.ingressclass\.kubernetes\.io/is-default-class}' && echo checked'''
+run = '''v=$(kubectl get ingressclass dojo-traefik -o jsonpath='{.metadata.annotations.ingressclass\.kubernetes\.io/is-default-class}') || exit 1
+case "$v" in ''|false) echo checked ;; *) exit 1 ;; esac'''
 equals = "checked"
 
 [[lab.steps.negatives]]
@@ -157,6 +158,20 @@ spec:
   controller: traefik.io/ingress-controller
 EOF
 '''
+undo = '''kubectl delete ingressclass dojo-traefik --ignore-not-found'''
+
+[[lab.steps.alternatives]]
+name = "explicitly marks the class as non-default"
+run = '''kubectl apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: dojo-traefik
+  annotations:
+    ingressclass.kubernetes.io/is-default-class: "false"
+spec:
+  controller: traefik.io/ingress-controller
+EOF'''
 undo = '''kubectl delete ingressclass dojo-traefik --ignore-not-found'''
 
 [[lab.steps]]
@@ -283,8 +298,15 @@ equals = "ok"
 timeout = 60
 
 [[lab.steps.checks]]
-name = "unmatched requests have a default backend"
-run = '''kubectl -n ingress-lab get ingress shop -o jsonpath='{.spec.defaultBackend.service.name}{" "}{.spec.defaultBackend.service.port.number}{.spec.defaultBackend.service.port.name}''''
+name = "the default backend reference resolves to fallback Service port 80"
+run = '''backend=$(kubectl -n ingress-lab get ingress shop -o jsonpath='{.spec.defaultBackend.service.name}') || exit 1
+[ "$backend" = fallback ] || exit 1
+number=$(kubectl -n ingress-lab get ingress shop -o jsonpath='{.spec.defaultBackend.service.port.number}') || exit 1
+if [ "$number" = 80 ]; then echo 'fallback 80'; exit 0; fi
+name=$(kubectl -n ingress-lab get ingress shop -o jsonpath='{.spec.defaultBackend.service.port.name}') || exit 1
+[ -n "$name" ] || exit 1
+port=$(kubectl -n ingress-lab get service fallback -o jsonpath="{.spec.ports[?(@.name==\"$name\")].port}") || exit 1
+[ "$port" = 80 ] && echo 'fallback 80' '''
 equals = "fallback 80"
 
 [[lab.steps.negatives]]
@@ -329,6 +351,30 @@ spec:
       - {path: /, pathType: Prefix, backend: {service: {name: fallback, port: {number: 80}}}}
 EOF
 sleep 3'''
+
+[[lab.steps.alternatives]]
+name = "references the default backend by its equivalent named Service port"
+run = '''kubectl apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shop
+  namespace: ingress-lab
+spec:
+  ingressClassName: dojo-traefik
+  defaultBackend:
+    service:
+      name: fallback
+      port: {name: http}
+  rules:
+  - host: shop.dojo.test
+    http:
+      paths:
+      - {path: /shop, pathType: Prefix, backend: {service: {name: web, port: {number: 80}}}}
+      - {path: /health, pathType: Exact, backend: {service: {name: status, port: {number: 80}}}}
+EOF
+sleep 3'''
+undo = '''kubectl -n ingress-lab patch ingress shop --type=merge -p '{"spec":{"defaultBackend":null}}' '''
 
 [[lab.steps]]
 title = "Terminate TLS"
@@ -487,7 +533,7 @@ kubectl -n dojo-ingress exec deploy/probe -- curl -s -H 'Host: shop.dojo.test' h
 kubectl -n dojo-ingress exec deploy/probe -- curl -s -H 'Host: other.dojo.test' http://traefik.dojo-ingress/shop
 ```
 
-The lab's backends answer with their own name and the path they received (`web /shop/cart`), so you can see which rule matched. HTTPS is also published on your machine: `curl -sk -H 'Host: shop.dojo.test' https://$PODDOJO_HOST:30443/shop`. On the exam, the equivalent is a `curl` from the exam terminal or a temporary Pod (`kubectl run tmp --rm -it --image=curlimages/curl:8.13.0 --restart=Never -- curl ...`).
+The lab's backends answer with their name and received path (`web /shop/cart`), so you can see which rule matched. HTTPS is also published on your machine: `curl -sk -H 'Host: shop.dojo.test' https://$PODDOJO_HOST:30443/shop`. This tests routing while disabling certificate verification. The Host header does not set TLS SNI; SNI comes from the URL hostname. For identity verification, use the hostname URL and a trusted certificate, as below. On the exam, send a request from the specified client location.
 
 ## Generate, inspect, apply
 
@@ -529,7 +575,15 @@ spec:
     secretName: shop-tls
 ```
 
-A reference does not issue or renew a certificate. Controllers often terminate HTTPS and send HTTP to backends; encrypting the backend hop requires separate controller-specific configuration. Likewise, redirects from HTTP to HTTPS are not standardized by the TLS stanza alone. The lab uses a self-signed certificate and verifies it with `curl --cacert shop.crt`: if the Ingress does not reference the Secret, or the certificate names another host, the controller presents its own default certificate and verification fails. Self-signed certificates practice the wiring; they do not establish browser trust. Never put a real private key into source control or display Secret data while debugging.
+A reference does not issue or renew a certificate. Controllers often terminate HTTPS and send HTTP to backends; encrypting the backend hop requires separate controller-specific configuration. Likewise, redirects from HTTP to HTTPS are not standardized by the TLS stanza alone. The lab's self-signed certificate must include `subjectAltName=DNS:shop.dojo.test`; a Common Name alone is insufficient for modern hostname verification. OpenSSL can add it with `-addext` or a configuration file's `x509_extensions` section, as the solution shows.
+
+Use `--cacert` to trust that training certificate and `--connect-to` to reach Traefik while preserving the URL hostname for SNI and verification:
+
+```bash
+kubectl -n dojo-ingress exec -i deploy/probe -- sh -c 'cat > /tmp/ca.pem && curl -sS --cacert /tmp/ca.pem --connect-to shop.dojo.test:443:traefik.dojo-ingress:443 https://shop.dojo.test/shop' < shop.crt
+```
+
+A missing Secret reference may cause a default certificate to be served; a wrong-host certificate may fail selection or hostname verification. Either fails the required identity check. Self-signing alone does not establish browser trust. Never commit a real private key or display Secret data while debugging.
 
 ## Controllers and the path toward Gateway API
 

@@ -7,7 +7,7 @@ needs = "docker"
 objectives = ["Choose run flags for services and one-shot commands", "Reach a published application port on the selected machine", "Inspect logs and execute additional processes inside a container", "Stop, start and remove named containers deliberately"]
 
 [[quiz]]
-q = "What does -p 18080:80 publish?"
+q = "With Docker's default host-binding settings, what does -p 18080:80 publish?"
 choices = ["Container port 18080 on host port 80", "Port 80 only inside the container", "Host port 18080 to container port 80", "Host port 18080 to container port 80, on 127.0.0.1 only"]
 answer = 2
 why = "The order is host:container. The process must listen on the container port and a reachable interface; EXPOSE alone would not publish anything."
@@ -26,9 +26,9 @@ why = "Automatic removal is useful for disposable commands, but the stopped obje
 
 [[quiz]]
 q = "Which command returns the last 20 log lines and then follows new output?"
-choices = ["docker logs -n 20 dojo-web", "docker logs --tail 20 -f dojo-web", "docker logs --tail 20 --timestamps dojo-web", "docker logs --since 20 dojo-web"]
+choices = ["docker logs -n 20 dojo-web", "docker logs --tail 20 -f dojo-web", "docker logs --tail 20 --timestamps dojo-web", "docker logs --since 20m dojo-web"]
 answer = 1
-why = "--tail bounds the initial history, while -f streams subsequent output. --since instead selects logs using a timestamp or duration, such as 5m."
+why = "--tail bounds the initial history, while -f streams subsequent output. --since instead selects logs using a timestamp or duration, such as 5m. -n 20 is another spelling of --tail 20, but does not follow without -f."
 
 [[quiz]]
 q = "What happens when you run docker start on a stopped container?"
@@ -90,10 +90,10 @@ timeout = 120
 [[lab.steps]]
 title = "Stop without deleting"
 task = "Stop **dojo-run-web** gracefully, allowing up to **10 seconds**. Keep the stopped object for inspection."
-hints = ["docker stop --time 10 NAME requests graceful shutdown before forcing termination.", "The desired state is exited, not absent."]
+hints = ["docker stop --timeout 10 NAME requests graceful shutdown before forcing termination.", "The desired state is exited, not absent."]
 solution = '''
 ```bash
-docker stop --time 10 dojo-run-web
+docker stop --timeout 10 dojo-run-web
 ```
 
 A manual stop suppresses automatic restarts. The container object and its changed index page remain.
@@ -128,7 +128,7 @@ task = "Stop and remove **dojo-run-web**. Remove only this lesson container; lea
 hints = ["Stop first, then docker rm the exact name."]
 solution = '''
 ```bash
-docker stop --time 10 dojo-run-web
+docker stop --timeout 10 dojo-run-web
 docker rm dojo-run-web
 ```
 
@@ -224,11 +224,11 @@ docker exec dojo-run-web sh -c 'printf "%s\n" "$DOJO_MODE"'
 docker exec -w /usr/share/nginx/html dojo-run-web ls
 ```
 
-The quoted shell runs inside the container, so `$DOJO_MODE` expands there. A stopped container cannot accept exec. A minimal image may lack a shell or diagnostic tools; that is an image property, not proof that Docker is broken. Changes made with exec are useful experiments, but production changes belong in an image build or external configuration.
+The single quotes protect `$DOJO_MODE` from your local shell. The `sh -c` process inside the container then expands it there. Likewise, put `> /usr/share/nginx/html/index.html` inside that quoted script when replacing the lab's page; outside the quotes, redirection would write on your computer. A stopped container cannot accept exec. A minimal image may lack a shell or diagnostic tools; that is an image property, not proof that Docker is broken. Changes made with exec are useful experiments, but production changes belong in an image build or external configuration.
 
 ## Stop, kill, start, restart, remove
 
-`docker stop --time 10 dojo-run-web` sends the configured stop signal, normally SIGTERM, then allows a grace period before SIGKILL. nginx images may specify a different stop signal for graceful shutdown. `docker kill dojo-run-web` sends SIGKILL by default and skips that opportunity. Use graceful stop for normal operations.
+`docker stop --timeout 10 dojo-run-web` sends the configured stop signal, normally SIGTERM, then allows a grace period before SIGKILL. nginx images may specify a different stop signal for graceful shutdown. `docker kill dojo-run-web` sends SIGKILL by default and skips that opportunity. Use graceful stop for normal operations. `--timeout` is the current flag; the older `--time` spelling was [deprecated in Docker 28](https://docs.docker.com/engine/deprecated/#--time-option-on-docker-stop-and-docker-restart).
 
 `docker start` starts the existing object; `docker restart` stops and starts it. Both retain its writable layer, environment, image ID and port mappings. Neither fetches a newer image just because its tag has moved. `docker rm` deletes a stopped container; `docker rm -f` also forcibly terminates a running one. Removal discards its writable layer, so it differs fundamentally from stop.
 

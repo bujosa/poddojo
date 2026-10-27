@@ -48,7 +48,7 @@ choices = [
   "It bypasses RBAC checks on the delete",
 ]
 answer = 2
-why = "A process can outlive force deletion temporarily. Replacements can overlap with an old instance, which matters especially for shared or stateful work."
+why = "A process can outlive removal of its API object; force deletion provides no termination guarantee. Replacements can overlap with an old instance, which matters especially for shared or stateful work."
 
 [lab]
 summary = "Generate reusable YAML, create resources, and make targeted changes at exam speed."
@@ -183,7 +183,7 @@ Generators save typing; they do not decide the right workload or add every field
 These commands create resources immediately unless you add dry-run output options. The examples all target this lesson's namespace. Do not run all of them blindly; choose the resource the task requests.
 
 ```bash
-kubectl -n speed-lab run scratch --image=busybox:1.36 --restart=Never -- sleep 3600
+kubectl -n speed-lab run scratch --image=busybox:1.36 --restart=Never --command -- sleep 3600
 kubectl -n speed-lab create deployment web --image=nginx:1.27-alpine --replicas=2
 kubectl -n speed-lab create service clusterip web --tcp=80:80
 kubectl -n speed-lab create job report --image=busybox:1.36 -- echo done
@@ -192,7 +192,7 @@ kubectl -n speed-lab create configmap settings --from-literal=MODE=practice
 kubectl -n speed-lab create secret generic credentials --from-literal=sample=training-only
 ```
 
-The Secret value above is dummy training data. Real credentials should not be typed into saved shell history or committed manifests. Base64 in a Secret manifest is encoding, not encryption.
+`--command --` makes the remaining words the Pod's `command` array; without `--command`, `kubectl run` puts trailing words into `args`. The ConfigMap command stores `MODE` as a string key; generate `settings.yaml` by adding the same dry-run/output flags used for the Pod. The Secret value above is dummy training data. Real credentials should not be typed into saved shell history or committed manifests. Base64 in a Secret manifest is encoding, not encryption.
 
 A generated Service has selectors that you must verify against the target Pods. Generating a Deployment and Service with the same name commonly produces matching app labels, but different names or edited templates can break that assumption.
 
@@ -257,7 +257,7 @@ kubectl -n speed-lab get pods -o custom-columns='NAME:.metadata.name,NODE:.spec.
 kubectl -n speed-lab get pods -l 'app in (web,api),tier!=cache'
 ```
 
-Selectors combine requirements with logical AND. Set membership is useful when several values are acceptable. A label query selects objects with matching metadata; it does not search their names or environment variables. JSONPath output does not automatically add a newline, so an empty result may look like a missing command.
+Selectors combine requirements with logical AND. A requirement such as `tier!=cache` also matches Pods that have no `tier` label; add an existence requirement when you need the key to be present. Set membership is useful when several values are acceptable. A label query selects objects with matching metadata; it does not search their names or environment variables. JSONPath output does not automatically add a newline, so an empty result may look like a missing command.
 
 ## Change the right object
 
@@ -271,7 +271,7 @@ kubectl -n speed-lab label deployment/api owner=learner --overwrite
 kubectl -n speed-lab annotate deployment/api training=timed --overwrite
 ```
 
-Set image needs the **container name**, which may differ from the Deployment name. Set env and set resources update the workload's Pod template and can trigger rollouts. Scaling changes the desired replica count. Labeling the Deployment's metadata does not automatically label its Pods; change template metadata when a Pod selector must see a new label.
+Set image needs the **container name**, which may differ from the Deployment name. Set env and set resources update the workload's Pod template and can trigger rollouts. Scaling changes the desired replica count. Follow template changes with `kubectl -n speed-lab rollout status deployment/api --timeout=120s` to wait for replacement replicas. Labeling the Deployment's metadata does not automatically label its Pods; change template metadata when a Pod selector must see a new label.
 
 Forced deletion with **--force --grace-period=0** removes the API object without waiting for confirmation that its processes stopped. Use it only when a task and the situation justify that consequence. It is not a general speed trick for stateful applications or shared machines.
 
@@ -286,7 +286,7 @@ export now='--force --grace-period=0'
 k -n speed-lab run draft --image=nginx:1.27-alpine $do > draft.yaml
 ```
 
-These variables intentionally expand into separate arguments; this pattern assumes an ordinary shell, not every command launcher. PodDojo console commands may run in separate shells, so do not rely on an alias or export surviving the next command. The worked lab solutions use complete commands.
+These variables intentionally expand into separate arguments in shells such as bash or POSIX sh. Zsh does not normally split unquoted scalar variables this way; use complete flags there or configure a suitable function. PodDojo console commands may run in separate shells, so do not rely on an alias or export surviving the next command. The worked lab solutions use complete commands.
 
 In vim, **:set expandtab shiftwidth=2 tabstop=2** helps produce YAML with two-space indentation. Paste carefully and inspect the surrounding structure. Interactive editing is useful in an exam, but saved heredocs make these labs reproducible.
 

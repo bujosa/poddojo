@@ -21,7 +21,7 @@ choices = [
   "Only explicitly shared volumes; each has its own IP",
 ]
 answer = 1
-why = "Containers share localhost and one Pod IP. Files are shared only through mounted volumes; each container image supplies its own root filesystem."
+why = "Containers share localhost and the Pod's IP addresses, normally one address per enabled IP family. Files are shared only through mounted volumes; each container image supplies its own root filesystem."
 
 [[quiz]]
 q = "Which field overrides an image ENTRYPOINT?"
@@ -30,7 +30,7 @@ answer = 2
 why = "command replaces the image entrypoint. args supplies arguments. Shell syntax works only when a shell is explicitly invoked."
 
 [[quiz]]
-q = "A one-off Pod must never be restarted by the kubelet, whether it succeeds or fails. Which restartPolicy?"
+q = "A one-container task has no container-level restart overrides. Which Pod restartPolicy prevents restarts after either success or failure?"
 choices = ["Always", "Never", "OnFailure", "OnFailure with backoffLimit: 0"]
 answer = 1
 why = "Never leaves the container terminated after any exit, keeping the result for inspection. OnFailure would restart it after a non-zero exit, Always after any exit; backoffLimit is a Job field, not a Pod field, so it cannot stop the kubelet restarting an OnFailure container."
@@ -193,12 +193,12 @@ equals = "hello-again Succeeded 0"
 
 ## A Pod is the unit Kubernetes places
 
-A Pod groups one or more containers that must share placement and lifecycle. Kubernetes schedules the Pod onto one node. Its containers share a network namespace and can share declared volumes, but they do not automatically share their root filesystems.
+A Pod groups one or more containers that must share placement and a Pod lifetime. Kubernetes schedules the Pod onto one node. Its containers share a network namespace and can share declared volumes, but they do not automatically share their root filesystems.
 
 For most ordinary applications, begin with one application container per Pod. Put tightly coupled helpers in the same Pod when they need localhost or shared files. Put independently scaled components in separate Pods behind Services. A web server and its database usually need different lifecycles and should not be bundled merely because they communicate.
 
 ```text
-Pod: one IP, one node, one lifecycle
+Pod: shared IPs, one node, one Pod lifetime
 ┌─────────────────────────────────────────┐
 │ container web      container helper     │
 │ private rootfs     private rootfs       │
@@ -283,11 +283,11 @@ ports:
     protocol: TCP
 ```
 
-A declared port documents the intended listener and gives it a name other objects can reference. It does not start the listener or expose traffic outside the Pod. A process can listen without a containerPort declaration; a declared port can exist without a listening process.
+A declared port documents the intended listener and gives it a name other objects can reference. It does not start the listener, restrict access to that port, or publish a host port. Other Pods may reach a listener through the Pod IP without this declaration, subject to networking policy. A process can listen without a containerPort declaration; a declared port can exist without a listening process.
 
 ## Restart policy, phase and container state
 
-The Pod-level restartPolicy normally defaults to Always. Never is useful for a single task whose successful exit you want to inspect. OnFailure restarts after nonzero exits while allowing successful exits to stay stopped. A Job requires Never or OnFailure rather than Always.
+The Pod-level `restartPolicy` defaults to `Always` and governs containers without an override. Kubernetes v1.37 also supports container-level restart policies and rules through the enabled-by-default beta `ContainerRestartRules` feature; those can override the Pod policy. These labs use no such overrides. Native sidecars are a separate restartable-init case covered later. Never is useful for a single task whose successful exit you want to inspect. OnFailure restarts after nonzero exits while allowing successful exits to stay stopped. A Job requires Never or OnFailure rather than Always.
 
 | Pod phase | Meaning |
 |---|---|
@@ -305,7 +305,7 @@ kubectl -n pods-lab logs greeter -c main
 kubectl -n pods-lab get pod greeter -o jsonpath='{.status.phase}'
 ```
 
-Use previous logs when diagnosing a container that restarted. Do not wait for Ready on a deliberately completed one-shot Pod: success is its Succeeded phase and zero exit code.
+Use previous logs when diagnosing a container that restarted. Do not wait for Ready on a deliberately completed one-shot Pod: success is its Succeeded phase and zero exit code. Use `kubectl -n pods-lab wait --for=jsonpath='{.status.phase}'=Succeeded pod/reporter --timeout=120s` for the lab task; this waits for the named phase instead of a readiness condition.
 
 ## Pods are mostly immutable
 

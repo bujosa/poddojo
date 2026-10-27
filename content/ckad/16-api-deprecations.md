@@ -15,7 +15,7 @@ why = "Deprecation gives migration notice. A removed served endpoint instead rej
 
 [[quiz]]
 q = "Which command discovers namespaced resource kinds and their API versions?"
-choices = ["kubectl api-versions", "kubectl api-resources --namespaced=true", "kubectl explain --api-version=v1", "kubectl get all -A"]
+choices = ["kubectl api-versions", "kubectl api-resources --namespaced=true", "kubectl explain pod --api-version=v1", "kubectl get all -A"]
 answer = 1
 why = "api-resources reports discovered kinds, short names, scope, and API versions. api-versions lists served group/version combinations; explain shows fields in a chosen schema."
 
@@ -32,8 +32,8 @@ answer = 1
 why = "The stable Ingress schema nests the Service reference under backend.service. HTTP paths also require pathType, so changing only apiVersion is insufficient for the old manifest."
 
 [[quiz]]
-q = "What can kubectl-convert prove by itself?"
-choices = ["That all controllers and external dependencies work", "That the output preserves all business behavior", "It can help transform supported known schemas, but output still needs review and server validation", "That no plugin installation is needed"]
+q = "Which statement about kubectl-convert is accurate?"
+choices = ["It verifies controllers and external dependencies", "It preserves application behavior without manual review", "It transforms supported schemas, but output still needs review and server validation", "It is included in every kubectl installation"]
 answer = 2
 why = "kubectl-convert is an optional plugin, not a guaranteed built-in command. Its supported conversions are limited by its compiled schemas; inspect semantic changes and validate the result."
 
@@ -263,6 +263,8 @@ Alpha APIs can change or disappear without the guarantees of stable APIs. Beta A
 | Beta | v1beta1, v2beta2 | Watch migration notices and replacement versions |
 | GA | v1, v2 | Prefer stable APIs supported by the target cluster |
 
+API stability does not guarantee enablement. Newly introduced built-in beta API versions are generally disabled by default and require server configuration to enable; beta feature gates have their own defaults. Discovery, rather than the version's spelling, tells you what this server accepts.
+
 The Kubernetes deprecation policy protects served APIs with defined notice periods. In general, beta removal follows at least nine months or three minor releases after deprecation, whichever is longer; alpha versions may disappear without prior notice. GA versions are not removed within a Kubernetes major version. Consult the [deprecation policy](https://kubernetes.io/docs/reference/deprecation-policy/) and release migration notes for the actual resource and any documented exception instead of calculating a deadline from memory.
 
 A deprecated but still served API can succeed while returning a warning. Read that warning: it identifies a version that should be migrated before a later upgrade. A removed API endpoint fails, often with a message such as no matches for kind in version. `--validate=false` does not bring an endpoint back or make the server understand a removed schema.
@@ -325,7 +327,7 @@ If migrating an old default backend, it becomes `spec.defaultBackend` with the s
 
 An explicitly empty selector `{}` in policy/v1beta1 selected no Pods, while `{}` in policy/v1 selects all Pods in the namespace. An omitted selector selects none in both versions. A simple version replacement can therefore change the scope dramatically while still passing validation.
 
-The lab tells you the intended target is only `app=dojo-web`, so write that explicit selector. This repairs intent rather than mechanically preserving the legacy select-nothing behavior. `minAvailable: 1` is a disruption budget for the selected application; it does not scale the Deployment. A PDB constrains voluntary evictions through the eviction API and is not a general guarantee against every outage or a replacement for a Deployment rollout budget. Do not test it by draining the learner's real nodes.
+The lab tells you the intended target is only `app=dojo-web`, so write that explicit selector. This repairs intent rather than mechanically preserving the legacy select-nothing behavior. `minAvailable: 1` requires one selected Pod to remain healthy when evaluating voluntary evictions; it does not scale the Deployment. A PDB constrains evictions through the eviction API, not direct Pod deletion or a Deployment's rolling update. It cannot prevent every outage. Do not test it by draining the learner's real nodes.
 
 ## HPA migration still needs runtime prerequisites
 

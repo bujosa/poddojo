@@ -232,7 +232,7 @@ A change under `spec.template` triggers a rollout: images, environment variables
 
 ## Availability is a budget
 
-`RollingUpdate` is the default strategy. Its two limits describe how much spare capacity you can use and how much availability you can lose during replacement. `maxSurge` is extra Pods above the desired count; `maxUnavailable` is the allowed shortage of available Pods below it. An available Pod has been Ready continuously for `minReadySeconds`.
+`RollingUpdate` is the default strategy. Its two limits describe how much spare capacity you can use and how much availability you can lose during replacement. `maxSurge` is extra Pods above the desired count; `maxUnavailable` is the allowed shortage of available Pods below it. An available Pod has been Ready continuously for `minReadySeconds`, which defaults to zero.
 
 | Setting | Three replicas, value 1 | Operational cost |
 |---|---|---|
@@ -254,6 +254,18 @@ spec:
       maxSurge: 1
       maxUnavailable: 0
 ```
+
+An HTTP readiness probe belongs inside the container entry under `spec.template.spec.containers`:
+
+```yaml
+readinessProbe:
+  httpGet:
+    path: /
+    port: 80
+  periodSeconds: 2
+```
+
+It tests nginx's HTTP response at the Pod IP. The default `/` page succeeds, while `/missing` returns 404 and fails readiness. Changing this probe changes the template, so it creates replacement Pods.
 
 This policy keeps the old serving capacity until new Pods become available. It can stall on a full cluster: the extra Pod cannot schedule, and the controller cannot remove a healthy old Pod without violating the budget. Look at Pending Pod events before blaming the Deployment controller. Requests, quotas, storage, and node affinity can all prevent that extra replica from starting.
 
@@ -289,7 +301,7 @@ kubectl -n rolling-lab rollout history deployment/dojo-web
 
 Read the `READY`, `UP-TO-DATE`, and `AVAILABLE` counts together. A Deployment can remain Available because old Pods still serve while its newest rollout is failing. Conversely, a new Pod may be Ready and already eligible for Service traffic before `minReadySeconds` allows the Deployment to count it as available. That delay observes stability; it is not a traffic quarantine.
 
-Record intent with `kubernetes.io/change-cause`. Annotate before the template update so the resulting ReplicaSet history gets a meaningful description. Do not rely on the old `--record` flag.
+Record intent with `kubernetes.io/change-cause`. This annotation is descriptive, editable metadata, not an immutable audit trail; updating it can also change the description of the current ReplicaSet. Annotate before the template update so the resulting ReplicaSet history gets a meaningful description. Do not rely on the old `--record` flag.
 
 ```bash
 kubectl -n rolling-lab annotate deployment/dojo-web \
@@ -308,7 +320,7 @@ A paused Deployment does not run rollback reconciliation. Resume before undoing.
 
 ## Recover from evidence
 
-A bad image, failing readiness probe, missing Secret, or unschedulable Pod can prevent progress. `progressDeadlineSeconds` must exceed `minReadySeconds`; it measures failure to progress rather than imposing one fixed total rollout duration. On expiry, the Progressing condition reports `ProgressDeadlineExceeded`. Kubernetes does **not** automatically undo the change.
+A bad image, failing readiness probe, missing Secret, or unschedulable Pod can prevent progress. `progressDeadlineSeconds` defaults to 600 and must exceed `minReadySeconds`; it measures failure to progress rather than imposing one fixed total rollout duration. On expiry, the Progressing condition reports `ProgressDeadlineExceeded`. Kubernetes does **not** automatically undo the change.
 
 Inspect `describe deployment`, the newest ReplicaSet, Pod events, and container logs. Fix the dependency when the new template is correct. Otherwise restore a known template:
 
