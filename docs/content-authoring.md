@@ -8,6 +8,7 @@ content/docker/track.toml        a track: id, title, order and its modules
 content/docker/NN-<slug>.md      a lesson (front matter + Markdown)
 content/ckad/…                   the CKAD track
 content/exams/<id>.toml          a timed mock exam
+content/reference/NN-<slug>.md   a reference page (cheat sheet, annotated YAML)
 ```
 
 Lessons are studied in module order (as listed in `track.toml`), then by file name. Number files
@@ -204,6 +205,25 @@ Pods and labelled client Pods, and checks run `kubectl exec <client> -- wget -q 
    remote repository.
 9. In TOML, prefer `'''literal'''` strings for `run` commands that contain backslashes or `{{ }}`,
    and `"""basic"""` strings for Markdown. Inside `"""` a `\` must be escaped (`\\`).
+
+## A reference page
+
+The Reference page (and its floating window, ⌘K) is the in-app counterpart of the kubernetes.io
+pages the exam allows: dense, copy-ready material to keep open while working.
+
+```markdown
++++
+id = "ref-network"                     # starts with ref-
+title = "Services, DNS, Ingress and NetworkPolicy"
+order = 5                              # position in the list
+summary = "One sentence shown under the title."
++++
+
+## Sections the learner can search and jump to…
+```
+
+Code blocks get ▶ Run only when they are safe to run (the same rule as lessons); prefer a
+disposable namespace such as `ref-practice` in examples.
 
 ## A mock exam
 

@@ -8,8 +8,8 @@ maintainer's Mac, against a real lab cluster, before a merge and before a releas
 ```bash
 cargo xtask ci                                   # fmt, clippy -D warnings, tests, content validation
 PODDOJO_CONTENT_DIR=content cargo run -q -p dojo -- verify all
-for e in ckad-mock-1 ckad-mock-2 ckad-mock-3; do
-  PODDOJO_CONTENT_DIR=content cargo run -q -p dojo -- verify exam:$e
+for f in content/exams/*.toml; do
+  PODDOJO_CONTENT_DIR=content cargo run -q -p dojo -- verify "exam:$(basename "$f" .toml)"
 done
 ```
 
@@ -23,15 +23,26 @@ alternative solutions accepted.
    request. Merge it.
 2. From a clean worktree of `main`:
    ```bash
-   cargo xtask ci
-   cargo xtask bundle
-   ditto -c -k --keepParent target/bundle/PodDojo.app target/PodDojo-vX.Y.Z-macos-arm64.zip
-   shasum -a 256 target/PodDojo-vX.Y.Z-macos-arm64.zip > target/SHA256SUMS.txt
+   cargo xtask release        # gates, signed PodDojo.app, zip and SHA256SUMS in target/release-assets
    ```
-3. Publish:
+   The app is signed ad-hoc by default. With an Apple Developer ID it is signed with the hardened
+   runtime and notarised, so it opens without any Gatekeeper warning:
+   ```bash
+   xcrun notarytool store-credentials poddojo-notary --apple-id <id> --team-id <team>   # once
+   PODDOJO_SIGN_IDENTITY="Developer ID Application: <name> (<team>)" \
+   PODDOJO_NOTARY_PROFILE=poddojo-notary cargo xtask release
+   ```
+3. Publish (the command is printed at the end of step 2):
    ```bash
    gh release create vX.Y.Z --target main --title "PodDojo vX.Y.Z" --notes-file <notes> \
-     target/PodDojo-vX.Y.Z-macos-arm64.zip target/SHA256SUMS.txt
+     target/release-assets/PodDojo-vX.Y.Z-macos-arm64.zip target/release-assets/SHA256SUMS.txt
    ```
 
-The app is not signed or notarised yet; the release notes say how to open it the first time.
+Without a Developer ID the release notes must say how to open the app the first time
+(right-click › Open, or `xattr -dr com.apple.quarantine PodDojo.app`).
+
+## Linux
+
+PodDojo builds and its tests pass on Linux (checked in a `rust` container, see the pull request
+that added this note). Build it with `cargo build --release -p poddojo -p dojo`; the app needs an
+X11 or Wayland session with OpenGL.
