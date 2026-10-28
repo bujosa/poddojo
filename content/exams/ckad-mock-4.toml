@@ -1409,7 +1409,7 @@ kubectl -n mock4-q08 get pods -l app=reconciliation --sort-by=.metadata.name -o 
 
 [[tasks.checks]]
 name = '''Scheduling evidence names this workload and its placement failure'''
-run = '''grep -E 'reconciliation-.*FailedScheduling.*(node selector|affinity)' "$PODDOJO_LAB_DIR/m4-scheduling.txt" >/dev/null && test "$(kubectl -n mock4-q08 get deploy reconciliation -o jsonpath='{.spec.template.spec.nodeSelector.kubernetes\.io/os}')" = linux && echo ok'''
+run = '''grep 'reconciliation-' "$PODDOJO_LAB_DIR/m4-scheduling.txt" | grep FailedScheduling | grep -Eq '(node selector|affinity)' && test "$(kubectl -n mock4-q08 get deploy reconciliation -o jsonpath='{.spec.template.spec.nodeSelector.kubernetes\.io/os}')" = linux && echo ok'''
 equals = '''ok'''
 timeout = 90
 
@@ -1514,7 +1514,7 @@ setup = [
 printf 'identity=training-client\nmode=practice\n' > "$PODDOJO_LAB_DIR/m4-client.conf"'''
 ]
 solution = '''```bash
-kubectl -n mock4-q09 create secret generic identity --from-env-file="$PODDOJO_LAB_DIR/m4-identity.env" --from-file=client.conf="$PODDOJO_LAB_DIR/m4-client.conf" --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n mock4-q09 create secret generic identity --from-literal=ACCOUNT="$(sed -n "s/^ACCOUNT=//p" "$PODDOJO_LAB_DIR/m4-identity.env")" --from-file=client.conf="$PODDOJO_LAB_DIR/m4-client.conf" --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n mock4-q09 apply -f - <<'EOF'
 apiVersion: v1
 kind: Pod
@@ -1564,7 +1564,7 @@ timeout = 90
 
 [[tasks.negatives]]
 name = '''A literal environment value prints the expected text without Secret wiring'''
-run = '''kubectl -n mock4-q09 create secret generic identity --from-env-file="$PODDOJO_LAB_DIR/m4-identity.env" --from-file=client.conf="$PODDOJO_LAB_DIR/m4-client.conf" --dry-run=client -o yaml | kubectl apply -f -
+run = '''kubectl -n mock4-q09 create secret generic identity --from-literal=ACCOUNT="$(sed -n "s/^ACCOUNT=//p" "$PODDOJO_LAB_DIR/m4-identity.env")" --from-file=client.conf="$PODDOJO_LAB_DIR/m4-client.conf" --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n mock4-q09 apply -f - <<'EOF'
 apiVersion: v1
 kind: Pod
@@ -1590,7 +1590,7 @@ kubectl -n mock4-q09 delete secret identity --ignore-not-found'''
 
 [[tasks.alternatives]]
 name = '''envFrom imports ACCOUNT from the same Secret'''
-run = '''kubectl -n mock4-q09 create secret generic identity --from-env-file="$PODDOJO_LAB_DIR/m4-identity.env" --from-file=client.conf="$PODDOJO_LAB_DIR/m4-client.conf" --dry-run=client -o yaml | kubectl apply -f -
+run = '''kubectl -n mock4-q09 create secret generic identity --from-literal=ACCOUNT="$(sed -n "s/^ACCOUNT=//p" "$PODDOJO_LAB_DIR/m4-identity.env")" --from-file=client.conf="$PODDOJO_LAB_DIR/m4-client.conf" --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n mock4-q09 apply -f - <<'EOF'
 apiVersion: v1
 kind: Pod
@@ -2372,9 +2372,9 @@ kubectl -n mock4-q14 delete endpointslice archive-manual --ignore-not-found'''
 id = "q15"
 domain = "networking"
 weight = 6
-title = "Migrate a ledger Ingress and preserve nested path semantics"
+title = "Migrate a ledger Ingress and preserve its path semantics"
 namespace = "mock4-q15"
-task = '''File `$PODDOJO_LAB_DIR/m4-ledger-legacy.yaml` cannot be applied to Kubernetes v1.37. Capture served networking APIs with `kubectl api-resources --api-group=networking.k8s.io -o wide` in `$PODDOJO_LAB_DIR/m4-networking-apis.txt`. Write a corrected stable-API manifest to `$PODDOJO_LAB_DIR/m4-ledger.yaml` and apply it as Ingress `ledger` in `mock4-q15`, class traefik, host ledger.exam.test. Route `/ledger` as Prefix to feed:80, but `/ledger/audit` as Exact to audit:80. `/ledger/audit/deep` must use feed; `/ledgerish` and other hosts must get controller 404s. Do not change the existing backends or add a default backend. Migrate backend field structure as well as apiVersion. The controller is reachable inside the cluster at http://traefik.dojo-ingress from deployment/probe in dojo-ingress.'''
+task = '''File `$PODDOJO_LAB_DIR/m4-ledger-legacy.yaml` cannot be applied to Kubernetes v1.37. Capture served networking APIs with `kubectl api-resources --api-group=networking.k8s.io -o wide` in `$PODDOJO_LAB_DIR/m4-networking-apis.txt`. Write a corrected stable-API manifest to `$PODDOJO_LAB_DIR/m4-ledger.yaml` and apply it as Ingress `ledger` in `mock4-q15`, class traefik, host ledger.exam.test. Route `/ledger` as Prefix to feed:80 and `/audit` as Exact to audit:80. `/audit/deep`, `/ledgerish` and other hosts must get controller 404s. Do not change the existing backends or add a default backend. Migrate backend field structure as well as apiVersion. The controller is reachable inside the cluster at http://traefik.dojo-ingress from deployment/probe in dojo-ingress.'''
 setup = [
 '''kubectl -n mock4-q15 apply -f - <<'EOF'
 apiVersion: v1
@@ -2449,7 +2449,7 @@ spec:
       paths:
       - path: /ledger
         backend: {serviceName: feed, servicePort: 80}
-      - path: /ledger/audit
+      - path: /audit
         backend: {serviceName: audit, servicePort: 80}
 EOF'''
 ]
@@ -2468,7 +2468,7 @@ spec:
       - path: /ledger
         pathType: Prefix
         backend: {service: {name: feed, port: {number: 80}}}
-      - path: /ledger/audit
+      - path: /audit
         pathType: Exact
         backend: {service: {name: audit, port: {number: 80}}}
 EOF
@@ -2484,26 +2484,27 @@ equals = '''ok'''
 timeout = 90
 
 [[tasks.checks]]
-name = '''Host routing, nested exact precedence and prefix fallback all work'''
+name = '''Host routing, the exact route and the prefix route all work'''
 run = '''for i in $(seq 1 20); do
-[ "$(kubectl -n dojo-ingress exec deploy/probe -- curl -sS --max-time 3 -H 'Host: ledger.exam.test' http://traefik.dojo-ingress/ledger/v1 2>/dev/null)" = 'feed /ledger/v1' ] && [ "$(kubectl -n dojo-ingress exec deploy/probe -- curl -sS --max-time 3 -H 'Host: ledger.exam.test' http://traefik.dojo-ingress/ledger/audit 2>/dev/null)" = 'audit /ledger/audit' ] && [ "$(kubectl -n dojo-ingress exec deploy/probe -- curl -sS --max-time 3 -H 'Host: ledger.exam.test' http://traefik.dojo-ingress/ledger/audit/deep 2>/dev/null)" = 'feed /ledger/audit/deep' ] && echo ok && exit 0
+[ "$(kubectl -n dojo-ingress exec deploy/probe -- curl -sS --max-time 3 -H 'Host: ledger.exam.test' http://traefik.dojo-ingress/ledger/v1 2>/dev/null)" = 'feed /ledger/v1' ] && [ "$(kubectl -n dojo-ingress exec deploy/probe -- curl -sS --max-time 3 -H 'Host: ledger.exam.test' http://traefik.dojo-ingress/ledger 2>/dev/null)" = 'feed /ledger' ] && [ "$(kubectl -n dojo-ingress exec deploy/probe -- curl -sS --max-time 3 -H 'Host: ledger.exam.test' http://traefik.dojo-ingress/audit 2>/dev/null)" = 'audit /audit' ] && echo ok && exit 0
 sleep 2; done; exit 1'''
 equals = '''ok'''
 timeout = 180
 
 [[tasks.checks]]
-name = '''Wrong host and a false path prefix stay unrouted'''
+name = '''Wrong host, a false path prefix and a sub-path of the exact route stay unrouted'''
 run = '''kubectl -n mock4-q15 get ingress ledger >/dev/null || exit 1
 for i in $(seq 1 20); do
 a=$(kubectl -n dojo-ingress exec deploy/probe -- curl -sS -o /dev/null -w '%{http_code}' --max-time 3 -H 'Host: other.exam.test' http://traefik.dojo-ingress/ledger 2>/dev/null)
 b=$(kubectl -n dojo-ingress exec deploy/probe -- curl -sS -o /dev/null -w '%{http_code}' --max-time 3 -H 'Host: ledger.exam.test' http://traefik.dojo-ingress/ledgerish 2>/dev/null)
-[ "$a|$b" = '404|404' ] && echo ok && exit 0
+c=$(kubectl -n dojo-ingress exec deploy/probe -- curl -sS -o /dev/null -w '%{http_code}' --max-time 3 -H 'Host: ledger.exam.test' http://traefik.dojo-ingress/audit/deep 2>/dev/null)
+[ "$a|$b|$c" = '404|404|404' ] && echo ok && exit 0
 sleep 2; done; exit 1'''
 equals = '''ok'''
 timeout = 180
 
 [[tasks.negatives]]
-name = '''Making the nested audit route Prefix steals requests meant for feed'''
+name = '''Making the audit route Prefix also serves its sub-paths'''
 run = '''kubectl api-resources --api-group=networking.k8s.io -o wide > "$PODDOJO_LAB_DIR/m4-networking-apis.txt"
 cat > "$PODDOJO_LAB_DIR/m4-ledger.yaml" <<'EOF'
 apiVersion: networking.k8s.io/v1
@@ -2518,7 +2519,7 @@ spec:
       - path: /ledger
         pathType: Prefix
         backend: {service: {name: feed, port: {number: 80}}}
-      - path: /ledger/audit
+      - path: /audit
         pathType: Prefix
         backend: {service: {name: audit, port: {number: 80}}}
 EOF
@@ -2542,7 +2543,7 @@ spec:
       - path: /ledger
         pathType: Prefix
         backend: {service: {name: feed, port: {name: http}}}
-      - path: /ledger/audit
+      - path: /audit
         pathType: Exact
         backend: {service: {name: audit, port: {name: http}}}
 EOF
