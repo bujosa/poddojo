@@ -65,6 +65,15 @@ pub enum Done {
         log: String,
     },
     ExamGraded(ExamAttempt),
+    DrillReady {
+        key: String,
+        ok: bool,
+        log: String,
+    },
+    DrillChecked {
+        key: String,
+        results: Vec<CheckResult>,
+    },
 }
 
 pub struct Running {

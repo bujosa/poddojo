@@ -8,8 +8,8 @@ objectives = ["Choose ClusterIP, NodePort, LoadBalancer, ExternalName or headles
 domain = "networking"
 
 [[quiz]]
-q = "A Service has port 8080 and targetPort http. Where does a client connect?"
-choices = ["The Pod IP on port 8080", "The Service IP on port 8080", "The node on port 8080 only", "The Service IP on the container port"]
+q = "A ClusterIP Service exposes port 8080 with targetPort http; its Pods define http as port 80. Where does a client connect through the Service?"
+choices = ["The Pod IP on port 8080", "The Service IP on port 8080", "The node IP on port 8080", "The Service IP on port 80"]
 answer = 1
 why = "Clients use the Service port. The named targetPort resolves independently against each selected Pod, allowing a backend to listen on a different port."
 
@@ -254,6 +254,8 @@ spec:
 
 The selected Pod declares `ports: [{name: http, containerPort: 80}]`. Using targetPort http decouples the Service from the backend's numeric port. Different selected Pods can resolve that name to different numbers during an application migration. Name the port consistently in every Pod template. The Service port name and the container port name are separate fields, even when both happen to be http.
 
+If omitted, `targetPort` defaults to the Service's `port`, and `protocol` defaults to TCP. A Service exposing several ports requires a unique name on each entry. A headless Service is still type ClusterIP; `Headless` is not a valid `spec.type` value.
+
 ## Choose the right Service shape
 
 | Shape | Discovery and reachability | Typical use |
@@ -270,7 +272,7 @@ In PodDojo, NodePort **30080** is published on the chosen Docker machine. Use `h
 
 LoadBalancer will normally show a pending external address in this lab. Its ClusterIP can still work. ExternalName is different: DNS returns an alias, and no Service proxy redirects traffic. An HTTP client may send the alias as its Host header, or validate TLS against it, while the upstream expects another hostname. DNS indirection does not solve that mismatch.
 
-A headless Service has no virtual IP and does not provide normal Service load balancing. With a selector, eligible Pod addresses are published for clients to choose. Stateful workloads often build stable discovery on headless Services. Do not try to convert an existing allocated ClusterIP to None casually; create the headless Service in that form.
+A headless Service has no virtual IP and does not provide normal Service load balancing. With a selector, eligible Pod addresses are published for clients to choose. Set `spec.clusterIP: None` when creating it; changing an allocated ClusterIP to None is rejected as an immutable-field change. Stateful workloads often build stable discovery on headless Services.
 
 ## Create quickly, then inspect
 
@@ -300,6 +302,8 @@ kubectl -n services-lab exec client -- wget -qO- -T 2 http://web
 Use a persistent `busybox:1.36` test Pod so every probe starts from the same network location. A successful request from your laptop is not equivalent to one from an application namespace. The network path, DNS configuration and NetworkPolicies can differ.
 
 When there are no usable endpoints, work in order. First compare selector key/value pairs against Pod labels in the **same namespace**; Services do not select Pods across namespaces. Next inspect readiness: Running Pods can still be unready. Finally verify named port resolution and the actual listening port. A wrong numeric targetPort can leave apparently healthy endpoints while every connection fails. A wrong named targetPort may prevent usable endpoint port information altogether.
+
+Normally only ready backends receive traffic. `publishNotReadyAddresses: true` deliberately overrides that readiness filtering, often for peer discovery; it does not make an unhealthy application ready. The lab uses ordinary readiness filtering. Resolve its headless name with `kubectl -n services-lab exec client -- nslookup web-headless.services-lab.svc.cluster.local`, then compare the returned addresses with the backend Pod IPs.
 
 If endpoints and ports are correct, test the Pod IP directly from the client. Then compare Service-IP access with DNS-name access. A failure only by name points toward DNS; a failure on both paths may involve policy or forwarding. An HTTP 404 means a server answered, which is different from a connection timeout. Read the failure before changing resources.
 

@@ -32,7 +32,7 @@ answer = 2
 why = "The Engine records health status. A separate orchestrator would need to act on it; Kubernetes does not derive its readiness or liveness probes from a Dockerfile HEALTHCHECK."
 
 [[quiz]]
-q = "Which image is necessarily the best production choice?"
+q = "Which criterion should guide production runtime-base selection?"
 choices = ["Whichever has the fewest bytes", "A base with exactly the needed runtime compatibility, security maintenance and operational support", "Whichever official image has the most recent tag", "Always a distroless image, regardless of the application"]
 answer = 1
 why = "Size matters, but an image must still run correctly, receive updates and support an operational strategy. libc compatibility, certificates, user IDs and debugging needs all influence the choice."
@@ -239,7 +239,7 @@ HEALTHCHECK --interval=2s --timeout=2s --start-period=2s --retries=10 CMD wget -
 
 The command runs **inside** the container and uses its network namespace. It tests the container port, not the host's published port. A shell-form command requires a shell, and `wget` must exist in the final image; tools present only in the builder are unavailable.
 
-Health progresses from `starting` to `healthy` or `unhealthy` as probes run. The start period allows initialization failures before normal failure counting. A health check should be bounded and lightweight; repeatedly invoking an expensive operation can damage the service it is meant to observe.
+Health progresses from `starting` to `healthy` or `unhealthy` as probes run. The start period allows initialization failures before normal failure counting. A success during that period marks the container healthy and ends that leniency: later failures count. Exit zero signals success; one signals failure, and two is reserved. A health check should be bounded and lightweight; repeatedly invoking an expensive operation can damage the service it is meant to observe.
 
 Inspect the result and recent probe output with `docker inspect`. Docker's ordinary restart policies act on process exit, not an unhealthy label, so health status alone does not restart a stuck process. The lab separately checks internal health and an external HTTP response because they cover different network paths.
 
@@ -257,7 +257,7 @@ docker image inspect -f '{{.Size}}' dojo/multi:runtime
 
 OCI annotation keys provide recognizable metadata conventions when used as image labels. They do not implement signature verification or prove the claimed source. Keep release values accurate, and never place secrets in labels or build arguments. Redeclare an argument inside each independent stage that consumes it.
 
-Compare byte sizes for the same local platform and similar functionality. The displayed logical image size is not the same as compressed registry transfer size or extra host disk usage after shared-layer reuse. The lab compares runtime and baseline directly instead of depending on an exact upstream image byte count.
+Compare byte sizes for the same local platform and similar functionality. The reported size depends on the image store and is not the same as compressed registry transfer size or additional disk usage after shared-layer reuse. The containerd store can account for both stored content and unpacked snapshots. The lab compares runtime and baseline directly instead of depending on an exact upstream image byte count.
 
 Buildx supports explicit target platforms, for example `docker buildx build --platform linux/amd64 --load -t dojo/multi:amd64 site`. Foreign execution may require emulation, and multi-platform exports depend on the selected builder and image store. A smaller image is useful only if its artifacts run on the intended CPU.
 

@@ -6,12 +6,22 @@ mod exams;
 mod home;
 mod learn;
 mod progress;
+mod reference;
+mod review;
 mod setup;
 mod welcome;
 
 use egui::RichText;
 
 use crate::theme::Tokens;
+
+pub use reference::ReferenceState;
+pub use review::ReviewState;
+
+/// Headline text: white on dark, black on light.
+pub fn strong_text(t: &Tokens) -> egui::Color32 {
+    if t.dark { egui::Color32::WHITE } else { egui::Color32::BLACK }
+}
 
 pub fn title(ui: &mut egui::Ui, t: &Tokens, text: &str, subtitle: &str) {
     ui.label(RichText::new(text).size(26.0).strong().color(if t.dark {

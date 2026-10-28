@@ -9,15 +9,15 @@ objectives = ["Choose probes according to traffic eligibility, restart recovery,
 
 [[quiz]]
 q = "Which probe failure normally removes a Pod from ordinary Service traffic without restarting its container?"
-choices = ["Readiness", "Liveness", "Startup after success", "Liveness with a high failureThreshold"]
+choices = ["Readiness", "Liveness", "Startup before success", "Liveness with a high failureThreshold"]
 answer = 0
-why = "Readiness controls whether the Pod should receive traffic. Liveness and startup failures past their thresholds trigger container restart behavior, rather than acting only as traffic gates."
+why = "Readiness controls whether the Pod should receive traffic. Liveness and startup failures past their thresholds terminate the container and apply its restart policy. Readiness alone changes traffic eligibility without terminating it."
 
 [[quiz]]
 q = "What happens to liveness and readiness while a startup probe has not succeeded?"
 choices = ["They run every second", "They are held until startup succeeds", "They run, but their failures are ignored", "Only liveness runs"]
 answer = 1
-why = "A startup probe protects slow initialization. It must succeed before liveness and readiness probes start; repeated startup failure still causes restart."
+why = "A startup probe protects slow initialization. It must succeed before liveness and readiness probes start. Repeated startup failure terminates the container; restart then depends on its policy."
 
 [[quiz]]
 q = "Which successThreshold is valid for liveness?"
@@ -35,7 +35,7 @@ why = "Exec launches the listed command without an implicit shell. Explicitly in
 q = "Which gRPC probe constraint matters?"
 choices = ["It supports named ports exactly like HTTP probes", "It requires a numeric port and the gRPC health checking protocol", "It works against any HTTP/2 route", "It requires TLS to be configured on the probe"]
 answer = 1
-why = "The built-in gRPC action checks the standard health protocol, takes a numeric port, and does not provide TLS/authentication configuration like a full application client."
+why = "The built-in gRPC action checks the standard health protocol, takes a numeric port, and uses plaintext by default. Kubernetes v1.37 offers alpha TLS mode only behind GRPCContainerProbeTLS; it does not provide a full client's authentication configuration."
 
 [lab]
 summary = "Observe an unready web server, restore its endpoint, induce liveness restarts, then repair the probe and add startup protection."
@@ -207,7 +207,7 @@ A process can be alive without being ready to serve requests. It can also be tem
 
 | Probe | Question | Repeated failure means |
 |---|---|---|
-| startup | Has initialization finished? | Restart the container after its startup budget |
+| startup | Has initialization finished? | Terminate after the failure threshold; restart according to policy |
 | readiness | Can this container serve now? | Mark it unready and normally exclude its Pod from Service backends |
 | liveness | Is this container stuck beyond useful self-recovery? | Restart the container according to restart behavior |
 
@@ -261,11 +261,11 @@ readinessProbe:
   timeoutSeconds: 2
 ```
 
-This fragment is for a gRPC application, not nginx. Built-in gRPC probes do not support named ports, a custom hostname, or TLS/authentication options. An ordinary HTTP/2 endpoint is not automatically a gRPC health endpoint. Match the probe to the server implementation instead of selecting the newest-looking action.
+This fragment is for a gRPC application, not nginx. Built-in gRPC probes require numeric ports and normally connect to the Pod IP over plaintext; they do not offer a custom-hostname field or client authentication. Kubernetes v1.37 adds alpha `grpc.mode: TLS` behind the disabled-by-default `GRPCContainerProbeTLS` gate on the API server and kubelet. That mode skips certificate verification. Use the default plaintext behavior in this lab; see the [upstream probe guide](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/#use-tls-with-grpc-probes). An ordinary HTTP/2 endpoint is not automatically a gRPC health endpoint. Match the probe to the server implementation instead of selecting the newest-looking action.
 
 ## Timing is a failure budget
 
-`initialDelaySeconds` delays the first check after container start. `periodSeconds` sets the nominal check interval. `timeoutSeconds` bounds one attempt. `failureThreshold` requires consecutive failures before the action is taken; `successThreshold` requires consecutive successes to recover. Liveness and startup successThreshold must be one; readiness can require more than one success.
+`initialDelaySeconds` defaults to zero and delays initial probing. With a startup probe, readiness and liveness cannot run before startup succeeds; their initial delays then begin, as described in the [probe field reference](https://kubernetes.io/docs/concepts/workloads/pods/probes/#configuration-fields). `periodSeconds` sets the nominal check interval. `timeoutSeconds` bounds one attempt. `failureThreshold` requires consecutive failures before the action is taken; `successThreshold` requires consecutive successes to recover. Liveness and startup successThreshold must be one; readiness can require more than one success.
 
 Defaults include a ten-second period, one-second timeout, three failures, and one success. These defaults are not appropriate for every application. A one-second timeout can be too short during normal load, while a long period may make recovery sluggish. Readiness may be checked more frequently while unready, so do not treat interval multiplication as an exact wall-clock promise.
 

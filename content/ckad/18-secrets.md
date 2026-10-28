@@ -26,7 +26,7 @@ answer = 1
 why = "The API merges stringData into data, encoding the values for storage and output. If a key exists in both, stringData wins on that write. It is a convenience for input, not a separate storage mechanism."
 
 [[quiz]]
-q = "Which Secret type and key are used for modern registry credentials?"
+q = "Which Secret type and key does kubectl create secret docker-registry generate?"
 choices = ["kubernetes.io/dockercfg with .dockercfg", "kubernetes.io/tls with tls.key", "kubernetes.io/dockerconfigjson with .dockerconfigjson", "kubernetes.io/basic-auth with username and password"]
 answer = 2
 why = "The docker-registry generator produces kubernetes.io/dockerconfigjson with a .dockerconfigjson document. Reference it using imagePullSecrets in the same namespace as the Pod. It is used by the kubelet, not automatically injected into the application."
@@ -75,7 +75,7 @@ name = "the generic Secret has the requested training value"
 run = '''t=$(kubectl -n secrets-lab get secret app-secret -o jsonpath='{.type}') && v=$(kubectl -n secrets-lab get secret app-secret -o jsonpath='{.data.message}' | base64 -d) && [ "$t" = Opaque ] && [ "$v" = training-only ] && echo ok'''
 equals = "ok"
 [[lab.steps.checks]]
-name = "the typed login Secret has both required values"
+name = "the typed login Secret has both requested values"
 run = '''t=$(kubectl -n secrets-lab get secret login-secret -o jsonpath='{.type}') && u=$(kubectl -n secrets-lab get secret login-secret -o jsonpath='{.data.username}' | base64 -d) && p=$(kubectl -n secrets-lab get secret login-secret -o jsonpath='{.data.password}' | base64 -d) && [ "$t" = kubernetes.io/basic-auth ] && [ "$u" = student ] && [ "$p" = unused-training-value ] && echo ok'''
 equals = "ok"
 
@@ -141,7 +141,7 @@ hints = ["openssl req -x509 -newkey with -nodes is non-interactive when -subj is
 solution = '''
 ```bash
 umask 077
-openssl req -x509 -newkey rsa:2048 -nodes -keyout training.key -out training.crt -days 1 -subj '/CN=dojo.example.com' 2>/dev/null
+openssl req -x509 -newkey rsa:2048 -nodes -keyout training.key -out training.crt -days 1 -subj '/CN=dojo.example.com' -addext 'subjectAltName=DNS:dojo.example.com' 2>/dev/null
 kubectl -n secrets-lab create secret tls training-tls --cert=training.crt --key=training.key --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n secrets-lab create secret docker-registry pull-secret --docker-server=registry.example.invalid --docker-username=student --docker-password=unused-training-value --dry-run=client -o yaml | kubectl apply -f -
 ```
@@ -213,7 +213,7 @@ Treat each arrow as a possible exposure point. A Secret manifest, a terminal tra
 | `kubernetes.io/dockerconfigjson` | `.dockerconfigjson` | Kubelet registry authentication |
 | `kubernetes.io/basic-auth` | `username`, `password` | Basic authentication integration |
 
-The API validates aspects of built-in types, such as required keys and registry JSON structure; a type label does not prove a credential works. A TLS consumer still needs a usable certificate chain and private key. A registry entry still needs valid permissions on the correct registry. Generic application Secrets remain `Opaque` unless you specify another type.
+The API validates aspects of built-in types, such as required keys and registry JSON structure; a type label does not prove a credential works. Basic-auth validation requires at least one of `username` or `password`; this lab requests both. TLS Secret validation requires both keys but does not establish certificate trust or a matching key pair. The kubectl TLS generator does check the pair. A registry entry still needs valid permissions on the correct registry. Generic application Secrets remain `Opaque` unless you specify another type. See the [Secret type reference](https://kubernetes.io/docs/concepts/configuration/secret/#types-of-secret) for each format's contract.
 
 ```bash
 kubectl -n secrets-lab create secret generic app-secret \
@@ -223,6 +223,8 @@ kubectl -n secrets-lab create secret tls training-tls \
 ```
 
 `--from-file` avoids placing the value itself in command arguments. Protect the source file as well. `kubectl create secret docker-registry` generates the registry document for you; `create secret generic --from-file=.dockerconfigjson=... --type=kubernetes.io/dockerconfigjson` imports an existing one.
+
+For the exercise certificate, `openssl req -x509 -newkey rsa:2048 -nodes -days 1 -keyout training.key -out training.crt -subj '/CN=dojo.example.com' -addext 'subjectAltName=DNS:dojo.example.com'` generates a self-signed pair. The SAN covers the hostname; a Common Name alone is insufficient for modern hostname verification. Self-signing does not make clients trust it. Use `umask 077` before creating the unencrypted training key.
 
 ## data and stringData are two input representations
 

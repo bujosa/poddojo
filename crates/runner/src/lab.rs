@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use poddojo_core::{Check, CheckResult, CommandOutput, Lesson, Needs, Requirement};
+use poddojo_core::{Check, CheckResult, CommandOutput, Exam, Lesson, Needs, Requirement};
 
 use crate::cluster;
 use crate::exec::{LabEnv, run};
@@ -127,6 +127,65 @@ pub fn reset(lesson: &Lesson, env: &LabEnv) -> (bool, String) {
     (true, log)
 }
 
+/// Namespaces an exam task works in: its own namespace plus the ones the exam setup creates for it
+/// (`mock3-q17` also owns `mock3-q17-edge`).
+pub fn task_namespaces(exam: &Exam, task_id: &str) -> Vec<String> {
+    let Some(ns) = exam.tasks.iter().find(|t| t.id == task_id).and_then(|t| t.namespace.clone()) else {
+        return Vec::new();
+    };
+    let mut out = vec![ns.clone()];
+    for cmd in &exam.setup {
+        let words: Vec<&str> = cmd.split_whitespace().collect();
+        if let Some(i) = words.windows(2).position(|w| w == ["create", "namespace"] || w == ["create", "ns"])
+            && let Some(name) = words.get(i + 2)
+            && name.starts_with(&format!("{ns}-"))
+            && !out.iter().any(|n| n == name)
+        {
+            out.push((*name).to_string());
+        }
+    }
+    out
+}
+
+/// Set up one exam task on its own, fresh, for a drill: remove what an earlier attempt left in the
+/// task's namespaces, then run the exam's shared setup and the task's own setup.
+pub fn prepare_task(exam: &Exam, task_id: &str, env: &LabEnv) -> (bool, String) {
+    if let Err(e) = cluster::guard(env) {
+        return (false, format!("✗ {e}\n"));
+    }
+    let Some(task) = exam.tasks.iter().find(|t| t.id == task_id) else {
+        return (false, format!("✗ no task `{task_id}` in {}\n", exam.id));
+    };
+    let mut log = match provide(&exam.requires, env) {
+        Ok(log) => log,
+        Err(e) => return (false, format!("✗ {e}\n")),
+    };
+    let mine = task_namespaces(exam, task_id);
+    let others: Vec<String> = exam
+        .tasks
+        .iter()
+        .filter(|t| t.id != task_id)
+        .flat_map(|t| task_namespaces(exam, &t.id))
+        .filter(|ns| !mine.contains(ns))
+        .collect();
+    let fresh: Vec<String> = mine
+        .iter()
+        .map(|ns| format!("kubectl delete namespace {ns} --ignore-not-found --wait=true --timeout=120s"))
+        .collect();
+    let (_, more) = run_all(&fresh, env, Duration::from_secs(150));
+    log.push_str(&more);
+    // The shared setup, minus what only prepares other tasks (their namespaces are left alone).
+    let mentions = |cmd: &str, ns: &str| cmd.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-')).any(|w| w == ns);
+    let shared = exam
+        .setup
+        .iter()
+        .filter(|cmd| mine.iter().any(|ns| mentions(cmd, ns)) || !others.iter().any(|ns| mentions(cmd, ns)));
+    let setup: Vec<String> = shared.chain(&task.setup).cloned().collect();
+    let (ok, more) = run_all(&setup, env, Duration::from_secs(600));
+    log.push_str(&more);
+    (ok, log)
+}
+
 pub fn write_files<'a>(dir: &Path, files: impl Iterator<Item = (&'a String, &'a String)>) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     for (name, text) in files {
@@ -166,6 +225,14 @@ mod tests {
             host: "127.0.0.1".into(),
             cluster: "poddojo".into(),
         }
+    }
+
+    #[test]
+    fn task_namespaces_include_the_ones_named_after_the_task() {
+        let catalog = poddojo_core::Catalog::embedded().unwrap();
+        let exam = catalog.exam("ckad-mock-3").unwrap();
+        assert_eq!(task_namespaces(exam, "q17"), vec!["mock3-q17", "mock3-q17-edge", "mock3-q17-other"]);
+        assert_eq!(task_namespaces(exam, "q01"), vec!["mock3-q01"]);
     }
 
     #[test]

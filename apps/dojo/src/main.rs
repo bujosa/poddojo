@@ -7,9 +7,7 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use poddojo_core::{
-    Case, Catalog, Check, CheckResult, Exam, Lesson, LessonStatus, Needs, Progress, QuizScore, exam, now,
-};
+use poddojo_core::{Case, Catalog, Check, CheckResult, Exam, Lesson, LessonStatus, Needs, Progress, exam, now};
 use poddojo_runner::profiles::{self, Profile, Profiles};
 use poddojo_runner::{LabEnv, Paths, Settings, Target, cluster, doctor, lab, targets, terminal};
 
@@ -22,6 +20,7 @@ Study
   lessons                  Every lesson with its status
   show <lesson>            Print a lesson (concepts, objectives, lab tasks)
   quiz <lesson>            Take the lesson's quiz here
+  review                   Answer the quiz questions due for spaced review
   prepare <lesson>         Write the lab files and run its setup
   check <lesson> [step]    Grade the lab (all steps, or one, numbered from 1)
   reset <lesson>           Clean up what the lab created and clear its lab progress
@@ -187,6 +186,7 @@ fn dispatch(args: &[&str]) -> Result<(), String> {
             Ok(())
         }
         ["quiz", id] => quiz(&mut Ctx::load()?, id),
+        ["review"] => review(&mut Ctx::load()?),
         ["prepare", id] => prepare(&mut Ctx::load()?, id),
         ["check", id] => check(&mut Ctx::load()?, id, None),
         ["check", id, step] => {
@@ -269,15 +269,17 @@ fn status(c: &Ctx, json: bool) -> Result<(), String> {
     let (done, total) = c.progress.done_count(&c.catalog);
     let resume = c.progress.resume(&c.catalog);
     let readiness = c.progress.readiness(&c.catalog);
-    let overall = c.progress.overall_readiness(&c.catalog);
+    let verdict = c.progress.exam_readiness(&c.catalog);
+    let deck = c.progress.deck.stats(&c.catalog, now());
     let streak = c.progress.streak(chrono::Local::now().date_naive());
     if json {
         let v = serde_json::json!({
             "lessons_done": done,
             "lessons_total": total,
             "resume": resume.map(|l| serde_json::json!({"id": l.id, "title": l.title, "track": l.track})),
-            "ckad_readiness_percent": overall,
+            "ckad_readiness": verdict,
             "domains": readiness,
+            "review": deck,
             "streak_days": streak,
             "machine": c.settings.target,
             "active_exam": c.progress.active_exam.as_ref().map(|e| &e.exam_id),
@@ -292,18 +294,30 @@ fn status(c: &Ctx, json: bool) -> Result<(), String> {
         let f = if n == 0 { 0.0 } else { d as f32 / n as f32 };
         println!("  {} {:>3}/{:<3} {}", bar(f, 20), d, n, t.title);
     }
-    println!("\nCKAD readiness {:.0}%", overall);
+    let recent = verdict.recent.map_or("no fresh mock yet".to_string(), |r| format!("recent fresh mocks {r:.0}%"));
+    println!(
+        "\nCKAD: {} · curriculum {:.0}% · {recent} ({} of {} mocks taken)",
+        verdict.verdict.title(),
+        verdict.coverage,
+        verdict.fresh.len(),
+        c.catalog.exams.len()
+    );
+    println!("  {}", verdict.advice);
     for r in &readiness {
-        let exam = r.best_exam.map_or("no exam yet".to_string(), |e| format!("best exam {e:.0}%"));
+        let exam = r.recent_exam.map_or("no mock yet".to_string(), |e| format!("mocks {e:.0}%"));
         println!(
-            "  {} {:>3}% {} ({}%, {}/{} lessons, {exam})",
-            bar(r.score(), 20),
-            (r.score() * 100.0) as u32,
+            "  {} {:>2}/{:<2} {} ({}% of the exam, {exam}){}",
+            bar(r.coverage(), 20),
+            r.lessons_done,
+            r.lessons_total,
             r.title,
             r.weight,
-            r.lessons_done,
-            r.lessons_total
+            if r.weak() { "  ← weak" } else { "" }
         );
+    }
+    let due = deck.due_questions + deck.due_tasks;
+    if due > 0 {
+        println!("\n↻  {due} card(s) due for review: `dojo review`");
     }
     if let Some(e) = &c.progress.active_exam {
         println!("\n⏱  exam `{}` in progress: `dojo exam status`", e.exam_id);
@@ -390,7 +404,7 @@ fn quiz(c: &mut Ctx, id: &str) -> Result<(), String> {
         return Err(format!("`{id}` has no quiz"));
     }
     let stdin = std::io::stdin();
-    let mut correct = 0;
+    let mut answers = Vec::new();
     for (i, q) in l.quiz.iter().enumerate() {
         println!("\nQ{}. {}", i + 1, q.q);
         let order = q.order(&l.id);
@@ -407,17 +421,16 @@ fn quiz(c: &mut Ctx, id: &str) -> Result<(), String> {
             .next()
             .map(|ch| (ch.to_ascii_lowercase() as u8).wrapping_sub(b'a') as usize)
             .and_then(|pos| order.get(pos).copied());
+        answers.push(pick);
         if pick == Some(q.answer) {
-            correct += 1;
             println!("✓ correct. {}", q.why);
         } else {
             let right = q.choices.get(q.answer).map_or("", String::as_str);
             println!("✗ the answer is: {right}\n  {}", q.why);
         }
     }
-    let score = QuizScore { correct, total: l.quiz.len() as u32 };
     c.progress.open_lesson(&l, now());
-    c.progress.record_quiz(&l, score, now());
+    let score = c.progress.record_quiz_answers(&l, &answers, now());
     c.save()?;
     println!(
         "\nScore {}/{} {}",
@@ -425,6 +438,60 @@ fn quiz(c: &mut Ctx, id: &str) -> Result<(), String> {
         score.total,
         if score.passed() { "· passed" } else { "· 70% needed to pass" }
     );
+    Ok(())
+}
+
+fn review(c: &mut Ctx) -> Result<(), String> {
+    use poddojo_core::review::{Item, resolve};
+    let due: Vec<String> = c
+        .progress
+        .deck
+        .due(&c.catalog, now())
+        .into_iter()
+        .filter(|(_, item)| matches!(item, Item::Question { .. }))
+        .map(|(k, _)| k)
+        .take(25)
+        .collect();
+    let tasks = c.progress.deck.stats(&c.catalog, now()).due_tasks;
+    if due.is_empty() {
+        println!("Nothing due. {}", if tasks > 0 { "Task drills are due: open Review in the app." } else { "" });
+        return Ok(());
+    }
+    let stdin = std::io::stdin();
+    let mut right = 0;
+    for (n, key) in due.iter().enumerate() {
+        let Some(Item::Question { lesson, question: q, .. }) = resolve(&c.catalog, key) else { continue };
+        println!("\n[{}/{}] {} · {}", n + 1, due.len(), lesson.title, q.q);
+        let order = q.order(&lesson.id);
+        for (pos, j) in order.iter().enumerate() {
+            println!("   {}) {}", (b'a' + pos as u8) as char, q.choices.get(*j).map_or("", String::as_str));
+        }
+        print!("> ");
+        let _ = std::io::stdout().flush();
+        let mut line = String::new();
+        if stdin.lock().read_line(&mut line).map_err(|e| e.to_string())? == 0 {
+            break;
+        }
+        let pick = line
+            .trim()
+            .chars()
+            .next()
+            .map(|ch| (ch.to_ascii_lowercase() as u8).wrapping_sub(b'a') as usize)
+            .and_then(|pos| order.get(pos).copied());
+        let ok = pick == Some(q.answer);
+        if ok {
+            right += 1;
+            println!("✓ {}", q.why);
+        } else {
+            println!("✗ the answer is: {}\n  {}", q.choices.get(q.answer).map_or("", String::as_str), q.why);
+        }
+        c.progress.record_review(key, ok, now());
+        c.save()?;
+    }
+    println!("\nReview: {right}/{} right. Misses come back in about 10 minutes.", due.len());
+    if tasks > 0 {
+        println!("{tasks} mock-exam task drill(s) due: open Review in the app.");
+    }
     Ok(())
 }
 
@@ -740,7 +807,7 @@ fn exam_grade(c: &mut Ctx) -> Result<(), String> {
     let results = grade_exam(&e, &env);
     let attempt = exam::grade(&e, &results, a.started_at, now());
     print_attempt(&e, &attempt);
-    c.progress.record_exam(attempt);
+    c.progress.record_exam(attempt, &c.catalog);
     c.save()
 }
 

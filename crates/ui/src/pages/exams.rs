@@ -10,7 +10,7 @@ use crate::icons::{self, Icon};
 use crate::jobs::Done;
 use crate::markdown::{self, Action};
 use crate::theme::{self, Tokens};
-use crate::{App, Drill, Page};
+use crate::{App, Page};
 
 impl App {
     pub fn exams_page(&mut self, ui: &mut egui::Ui) {
@@ -26,10 +26,6 @@ impl App {
             if let Some(result) = self.exam.result.clone() {
                 self.exam_result(ui, &t, &result);
                 ui.add_space(16.0);
-            }
-            if self.exam.drill.is_some() {
-                self.drill(ui, &t);
-                return;
             }
             title(ui, &t, "Exams", "Performance-based mock exams graded on your lab cluster, under the real exam's rules: 2 hours, ~66% to pass, kubernetes.io docs allowed, no hints.");
             if !self.cluster_running() {
@@ -131,104 +127,23 @@ impl App {
             ui.add_space(8.0);
             theme::card(&t).show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.label(RichText::new("Knowledge drill").size(18.0).strong());
-                ui.label(RichText::new("20 random questions from the lessons you have opened. Quick, no cluster needed: good for a coffee break.").color(t.muted));
-                if ui.button("Start a drill").clicked() {
-                    self.start_drill();
+                ui.horizontal(|ui| {
+                    icons::show(ui, Icon::Repeat, 20.0, t.accent);
+                    ui.label(RichText::new("After a mock").size(18.0).strong());
+                });
+                ui.label(
+                    RichText::new(
+                        "Every task you did not fully solve becomes a timed drill on the Review page, set up fresh, \
+                         until you can solve it at exam pace. Take each mock once, fresh: a retake measures memory, \
+                         so only first attempts count towards readiness.",
+                    )
+                    .color(t.muted),
+                );
+                if ui.button("Open Review").clicked() {
+                    self.page = Page::Review;
                 }
             });
         });
-    }
-
-    fn start_drill(&mut self) {
-        let mut pool: Vec<(String, usize)> = Vec::new();
-        for (id, l) in &self.catalog.lessons {
-            if self.progress.lesson(id).is_some() {
-                pool.extend((0..l.quiz.len()).map(|i| (id.clone(), i)));
-            }
-        }
-        if pool.len() < 5 {
-            pool = self
-                .catalog
-                .lessons
-                .iter()
-                .flat_map(|(id, l)| (0..l.quiz.len()).map(move |i| (id.clone(), i)))
-                .collect();
-        }
-        // Shuffle with a small LCG seeded by the clock (no rand dependency).
-        let mut seed = (now() as u64).wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-        for i in (1..pool.len()).rev() {
-            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-            pool.swap(i, (seed >> 33) as usize % (i + 1));
-        }
-        pool.truncate(20);
-        let n = pool.len();
-        self.exam.drill = Some(Drill { questions: pool, answers: vec![None; n], submitted: false });
-    }
-
-    fn drill(&mut self, ui: &mut egui::Ui, t: &Tokens) {
-        let Some(mut drill) = self.exam.drill.take() else { return };
-        title(ui, t, "Knowledge drill", &format!("{} questions", drill.questions.len()));
-        let mut close = false;
-        for (i, (lesson, qi)) in drill.questions.iter().enumerate() {
-            let Some(q) = self.catalog.lesson(lesson).and_then(|l| l.quiz.get(*qi)) else { continue };
-            theme::card(t).show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.label(RichText::new(format!("{}. {}", i + 1, q.q)).strong());
-                for (pos, j) in q.order(lesson).into_iter().enumerate() {
-                    let Some(c) = q.choices.get(j) else { continue };
-                    let picked = drill.answers.get(i).copied().flatten() == Some(j);
-                    let state = match (drill.submitted, picked, j == q.answer) {
-                        (false, true, _) => theme::ChoiceState::Picked,
-                        (false, false, _) | (true, false, false) => theme::ChoiceState::Idle,
-                        (true, true, true) => theme::ChoiceState::Correct,
-                        (true, true, false) => theme::ChoiceState::Wrong,
-                        (true, false, true) => theme::ChoiceState::Missed,
-                    };
-                    if theme::choice(ui, t, (b'A' + pos as u8) as char, c, state, !drill.submitted).clicked()
-                        && let Some(a) = drill.answers.get_mut(i)
-                    {
-                        *a = Some(j);
-                    }
-                    ui.add_space(4.0);
-                }
-                if drill.submitted {
-                    ui.label(RichText::new(&q.why).small().color(t.muted));
-                }
-            });
-            ui.add_space(4.0);
-        }
-        ui.horizontal(|ui| {
-            if !drill.submitted {
-                if ui.button("Submit").clicked() {
-                    drill.submitted = true;
-                    let right = drill
-                        .questions
-                        .iter()
-                        .zip(&drill.answers)
-                        .filter(|((l, qi), a)| {
-                            self.catalog.lesson(l).and_then(|l| l.quiz.get(*qi)).is_some_and(|q| **a == Some(q.answer))
-                        })
-                        .count();
-                    self.toast(
-                        format!("Drill: {right}/{}", drill.questions.len()),
-                        right * 10 >= drill.questions.len() * 7,
-                    );
-                }
-            } else if ui.button("New drill").clicked() {
-                close = true;
-                self.start_drill();
-                return;
-            }
-            if ui.button("Close").clicked() {
-                close = true;
-            }
-        });
-        if !close {
-            self.exam.drill = Some(drill);
-        } else if self.exam.drill.is_none() {
-            self.exam.drill = None;
-        }
     }
 
     fn exam_env(&self, e: &Exam) -> Option<poddojo_runner::LabEnv> {
@@ -632,6 +547,16 @@ fn task_row(
 ) -> egui::Response {
     let width = ui.available_width();
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 38.0), egui::Sense::click());
+    resp.widget_info(|| {
+        let flag = if flagged { ", flagged" } else { "" };
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Button,
+            true,
+            selected,
+            format!("Task {n}: {title}, {weight} points{flag}"),
+        )
+    });
+    theme::focus_ring(ui, &resp, rect, 9.0);
     let p = ui.painter();
     if selected {
         p.rect_filled(rect, 9.0, t.accent_soft);
@@ -683,12 +608,5 @@ fn task_row(
 }
 
 fn short_domain(id: &str) -> &'static str {
-    match id {
-        "design-build" => "Design & Build",
-        "deployment" => "Deployment",
-        "observability" => "Observability",
-        "config-security" => "Config & Security",
-        "networking" => "Networking",
-        _ => "Other",
-    }
+    poddojo_core::DOMAINS.iter().find(|d| d.id == id).map_or("Other", |d| d.short)
 }

@@ -336,7 +336,7 @@ storage source → Pod volume name → container volumeMount
                      └──────────→ another container's mount
 ```
 
-The volume declaration belongs under Pod spec.volumes. Each participating container mounts that volume through volumeMounts. A mount can hide files already present at that path in the image, so choose the mount directory carefully.
+The volume declaration belongs under Pod `spec.volumes`. Unlike Docker's empty-volume copy-up, mounting a Kubernetes `emptyDir` does not seed it from image files at that path; initialize any required content explicitly. Each participating container mounts that volume through volumeMounts. A mount can hide files already present at that path in the image, so choose the mount directory carefully.
 
 The critical question is **what must survive?** A container restart, replacement of the entire Pod, or loss of the node are different events. Different storage backends provide different guarantees. A persistent claim is an API-level storage contract, not a backup strategy.
 
@@ -443,13 +443,13 @@ ReadWriteOnce permits read-write mounting from one node, potentially by multiple
 
 ReadWriteOncePod restricts use to a single Pod and is supported for CSI volumes with the necessary driver support. Do not assume the lab's local-path provisioner supports every access mode. Request a mode the backend can deliver rather than changing the field until an incompatible system appears to work.
 
-Access modes describe storage capabilities rather than replacing filesystem permissions. Use a read-only volumeMount when a particular container must not write.
+Access modes primarily participate in matching claims to suitable storage; they do not, by themselves, enforce filesystem write protection. `ReadWriteOncePod` adds a single-Pod restriction, but ordinary `ReadWriteOnce` is not a per-Pod lock. Use a read-only volumeMount when a particular container must not write.
 
 Reclaim policy determines what happens to the underlying volume after its claim is deleted. Delete normally removes dynamically provisioned storage; Retain preserves it for manual recovery. Deleting only a Pod does not delete its independently created PVC. Inspect policy before removing a claim containing valuable data.
 
 ## Projection assembles read-only configuration
 
-A projected volume combines multiple configuration sources into one directory. Supported sources include ConfigMaps, Secrets and downward API fields; a projected ServiceAccount token is another important source. Each source contributes named files.
+A projected volume combines multiple configuration sources into one directory. Supported sources include ConfigMaps, Secrets and downward API fields; a projected ServiceAccount token is another important source. Each source contributes named files. Create the lab's sources with `kubectl -n volumes-lab create configmap settings --from-literal=message=hello-projected` and `kubectl -n volumes-lab create secret generic sample --from-literal=note=training-only`. The ConfigMap key `message` and Secret key `note` become filenames; downward API `fieldPath: metadata.name` supplies the Pod name to the explicitly chosen path `pod-name`. All referenced ConfigMaps and Secrets must be in the Pod's namespace.
 
 ```yaml
 # A volume entry inside a Pod:

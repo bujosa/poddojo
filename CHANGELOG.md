@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.0
+
+- **Review**: every quiz answer and mock-exam task joins a spaced-repetition deck (1, 3, 7, 16, 35
+  days; misses come back the same day). One question at a time with keyboard answers, and missed
+  mock tasks come back as **timed drills** set up fresh on the cluster. `dojo review` in the CLI.
+- **Would you pass today?** replaces the blended readiness percentage: a verdict from your fresh
+  first attempts of each mock, curriculum coverage and weak domains, with the next step to take.
+- **Reference**: eight dense, copy-ready pages (kubectl, Pod YAML, workloads, config and secrets,
+  networking, observability, packaging, API deprecations), searchable, and a floating window (⌘K)
+  beside labs, drills and mocks.
+- **CKAD Mock Exam 4 (exam day)**: 17 new tasks at the hardest real-exam level.
+- **Proofread content**: every lesson checked against Kubernetes v1.37, Helm 4 and Docker 28;
+  quiz ambiguities removed; the real exam's rules described accurately. New first lesson: the
+  terminal, YAML and vim, for learners starting from zero.
+- Progress page with an activity heatmap and a mock score trend; Docker explorer shows only
+  PodDojo's resources by default and confirms stopping anything else; kubectl short names in the
+  cluster explorer; inline code in quiz text.
+- Accessibility: screen-reader labels and keyboard focus rings on every custom control.
+- `cargo xtask release` (gates, signed bundle, zip, checksums); Developer ID signing and
+  notarisation when configured.
+
 ## 0.2.1
 
 - **Lessons use wide screens**: a centred reading column with larger text (16 px on 25 px lines)

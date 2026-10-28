@@ -5,14 +5,15 @@ PodDojo is a Cargo workspace. Each layer only depends on the ones above it.
 ```text
 content/            Markdown + TOML curriculum (embedded at build time by crates/core/build.rs)
    │
-crates/core         Catalog (tracks, lessons, quizzes, labs, exams) + validation
-                    Progress (resume, completion, readiness, streak)  ── JSON in the data folder
+crates/core         Catalog (tracks, lessons, quizzes, labs, exams, reference) + validation
+                    Progress (resume, completion, readiness verdict, streak)  ── JSON in the data folder
+                    Review deck (Leitner spaced repetition of quiz questions and exam tasks)
                     Check evaluation + exam grading (pure, no processes)
    │
 crates/runner       exec      /bin/sh -c with the lab environment, timeouts, live output
                     targets   Docker contexts = machines (local socket, ssh://, tcp://)
                     cluster   kind lab cluster + guard (only kind-poddojo, own kubeconfig)
-                    lab       prepare / check / reset a lesson's lab
+                    lab       prepare / check / reset a lesson's lab; set up one exam task for a drill
                     explore   docker ps/images/history, kubectl get … -o json summaries
                     doctor    docker, kubectl, kind, helm, ssh
                     shell     the built-in terminal: bash on a pseudo-terminal + a VT100 screen
@@ -68,8 +69,22 @@ tasks, and roll scores up into the five CKAD domains. `dojo verify` proves conte
 checks must fail before a step's solution runs, reject every declared negative case (incomplete or
 wrong work), accept every alternative solution, and pass after the worked solution.
 
+## Spaced review and readiness
+
+`core::review` keeps a deck of cards in the progress file: one per quiz question answered (keyed by
+lesson id + a hash of the question text, so reordering keeps history) and one per mock-exam task
+attempted. A correct answer moves a card up a box (due again in 1, 3, 7, 16, 35 days); a miss sends
+it back to box 0, due again in 10 minutes. Exam tasks without full marks are due at once as
+**drills**: `lab::prepare_task` deletes the task's namespaces, reruns the shared setup that concerns
+them and the task's own setup, and the Review page times it at exam pace (1.2 minutes per point).
+
+Readiness is a verdict, not a blended number: only **fresh** attempts (the first attempt of each
+mock) count, because a retake measures memory. The verdict combines curriculum coverage (lessons
+done, weighted like the exam), the mean of the last two fresh mocks, and weak domains (under 66%).
+"Ready to book" needs two or more fresh mocks averaging 80%+, no weak domain and 90%+ coverage.
+
 ## Progress and resume
 
-`<data>/progress.json` records lessons read, best quiz scores, passed lab steps, study minutes,
+`<data>/profiles/<id>/progress.json` records lessons read, the review deck, best quiz scores, passed lab steps, study minutes,
 active days, exam attempts and the exam in progress. "Resume" is the last unfinished lesson, else
 the next unfinished one. The app and the CLI read and write the same file.

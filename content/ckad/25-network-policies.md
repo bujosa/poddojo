@@ -8,7 +8,7 @@ objectives = ["Explain directional isolation and additive policy behavior", "Com
 domain = "networking"
 
 [[quiz]]
-q = "Two ingress policies select the same Pod. What traffic is permitted?"
+q = "Two ingress policies select the same Pod. How do their explicit ingress allowances combine?"
 choices = ["Only traffic allowed by both", "The union of their allowed traffic", "Only the newest policy", "None until policy priority is configured"]
 answer = 1
 why = "NetworkPolicies are additive allow-lists. A deny-all policy creates isolation but cannot override an allow rule in another policy."
@@ -297,6 +297,8 @@ Without NetworkPolicies selecting it, an ordinary Pod is non-isolated: Kubernete
 
 Selection causes isolation **per direction**. An ingress policy does not automatically isolate egress. An egress policy does not automatically isolate ingress. Once isolated, a connection in that direction must match an allowance in at least one applicable policy. Replies to an allowed connection are implicitly allowed; you do not need a reverse rule for every response packet.
 
+Isolation has exceptions: a Pod cannot block access to itself, and traffic to or from its own node remains allowed. It is not a host firewall. These labs test ordinary connections between distinct Pods, rather than node-originated probes or hostNetwork workloads.
+
 ```text
 source Pod -- source egress rules -- network -- destination ingress rules -- destination Pod
                    must allow                         must allow
@@ -311,10 +313,10 @@ There is no first-match order or priority in the standard NetworkPolicy API. All
 | Shape | Meaning |
 |---|---|
 | Top-level podSelector: {} | Select every Pod in this namespace |
-| ingress: [] | No ingress allowance in this policy |
-| ingress: [{}] | Allow all ingress to selected Pods |
-| egress: [] | No egress allowance in this policy |
-| egress: [{}] | Allow all egress from selected Pods |
+| ingress: [] with policyTypes: [Ingress] | No ingress allowance in this policy |
+| ingress: [{}] with policyTypes: [Ingress] | Allow all ingress to selected Pods |
+| egress: [] with policyTypes: [Egress] | No egress allowance in this policy |
+| egress: [{}] with policyTypes: [Egress] | Allow all egress from selected Pods |
 
 The difference between an empty list and a list containing an empty rule is enormous. An empty peer selector also has different scope depending on where it appears. Read the entire YAML nesting, not just the braces.
 
@@ -331,7 +333,7 @@ spec:
   egress: []
 ```
 
-Set policyTypes explicitly. Defaults can infer Ingress and infer Egress when egress rules are present, but an explicit deny-egress policy with no rules is easier to understand and safer to review when Egress is stated.
+Set policyTypes explicitly. When omitted, the default always includes Ingress and also includes Egress if egress rules are present. A deny-egress policy with no rules therefore needs explicit `policyTypes: [Egress]`; do not rely on an empty `egress` list to select that direction.
 
 ## Select a destination, then select its peers
 
@@ -380,11 +382,15 @@ An ipBlock peer specifies a CIDR, optionally excluding smaller ranges using exce
 
 ipBlock is most useful for external destinations. Pod IPs are ephemeral, and Service address translation can occur before or after policy processing depending on the network implementation. Avoid encoding a Service virtual IP as a portable substitute for selecting backend Pods. Standard NetworkPolicy also cannot match an HTTP path, DNS hostname, user identity or TLS certificate. It operates on peers and supported transport ports.
 
+Port rules support TCP, UDP and SCTP, with implementation support required for SCTP. An omitted protocol defaults to TCP. Effects on other protocols, such as ICMP, are not defined uniformly, so ping is not a portable test of a TCP allow rule.
+
 ## Egress isolation includes DNS
 
 Applications usually resolve a name before opening an HTTP connection. Default-deny egress blocks that lookup unless DNS is explicitly allowed. In this kind lab, CoreDNS Pods live in kube-system and carry `k8s-app=kube-dns`. Combine that Pod selector and namespace selector in one peer, and permit **UDP 53 and TCP 53**.
 
 Use a separate egress rule for TCP 80 to backend Pods. Combining both DNS and backend destinations with all three ports in one rule would allow more combinations than required. Production clusters may use NodeLocal DNS or different labels, so inspect the actual resolver architecture rather than applying this destination blindly everywhere.
+
+For DNS, the rule's `to` peer combines `namespaceSelector` matching `kubernetes.io/metadata.name: kube-system` with `podSelector` matching `k8s-app: kube-dns`. Its `ports` list has separate `{protocol: UDP, port: 53}` and `{protocol: TCP, port: 53}` entries. The application rule instead uses a same-namespace `podSelector` for `app: backend` and only TCP 80.
 
 ## Prove behavior with fresh connections
 

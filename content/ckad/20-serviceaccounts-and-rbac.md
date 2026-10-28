@@ -27,7 +27,7 @@ why = "A RoleBinding limits the grant to its own namespace even when it referenc
 
 [[quiz]]
 q = "Which apiGroups value selects core resources such as Pods and ConfigMaps?"
-choices = ["v1", "core/v1", "An empty string", "`core`"]
+choices = ["v1", "apps", "An empty string", "batch"]
 answer = 2
 why = "RBAC uses API groups, not apiVersion strings. Core resources use apiGroups: [\"\"], Deployments use apps, and Jobs use batch. Resource names are normally lowercase plurals."
 
@@ -246,6 +246,19 @@ Modern in-cluster credentials use projected, time-bound tokens that the kubelet 
 
 Set `automountServiceAccountToken: false` on an account or Pod when API access is unnecessary. Pod-level configuration takes precedence. This controls automatic credential delivery, not RBAC permission, and explicit projection remains possible. The lab shows that distinction without printing a token. An explicitly projected token alone also does not supply every client input: an API client may need a CA bundle and server address.
 
+For explicit projection, put this under `spec.volumes` and mount `api-token` read-only at `/var/run/dojo-token` in the consuming container:
+
+```yaml
+- name: api-token
+  projected:
+    sources:
+    - serviceAccountToken:
+        path: token
+        expirationSeconds: 600
+```
+
+The resulting file is `/var/run/dojo-token/token`. The minimum requested lifetime is 600 seconds; the server determines the issued lifetime. Omitting `audience` requests the API server's audience. This works even when automatic mounting is disabled.
+
 ## Roles describe actions; bindings connect identities
 
 All four RBAC objects use `rbac.authorization.k8s.io/v1`:
@@ -300,7 +313,9 @@ Testing as your current administrator identity proves little about the workload.
 
 Admission controllers include ServiceAccount defaulting, LimitRanger, ResourceQuota and Pod Security Admission. Pod Security Admission implements the Pod Security Standards using namespace labels such as `pod-security.kubernetes.io/enforce=restricted`. `warn` reports violations to the requester; `audit` records them for auditing; `enforce` rejects violating Pods. Version labels pin the policy definition. Labeling a namespace does not evict its existing Pods.
 
-`ValidatingAdmissionPolicy` provides declarative validation using CEL expressions within the API server. A policy defines matching and validation logic; a `ValidatingAdmissionPolicyBinding` determines where it applies and its validation actions. It can enforce organization-specific object constraints beyond RBAC. It validates content and does not replace identity checks or grant permissions. You need not install a webhook server to understand or use this mechanism.
+The lab also sets `pod-security.kubernetes.io/enforce-version=v1.37`. Its Linux Pod uses Pod-level `runAsUser: 1000`, `runAsNonRoot: true` and `seccompProfile: {type: RuntimeDefault}`. Each container disables privilege escalation and drops `ALL` capabilities. These fields satisfy the relevant Restricted checks without making the container privileged; the next lesson explains their runtime effects.
+
+`ValidatingAdmissionPolicy` uses `admissionregistration.k8s.io/v1` and provides declarative validation using CEL expressions within the API server. A policy defines matching and validation logic; a `ValidatingAdmissionPolicyBinding` determines where it applies and its validation actions. It can enforce organization-specific object constraints beyond RBAC without installing a webhook server. It validates content and does not grant permissions. See the [RBAC reference](https://kubernetes.io/docs/reference/access-authn-authz/rbac/) for grant scope and subresources.
 
 ## Exam tips
 

@@ -1,6 +1,11 @@
-//! Repository tasks: `cargo xtask ci` (every gate), `cargo xtask icon` (render the app icon) and
-//! `cargo xtask bundle [--install]` (build PodDojo.app for macOS; `--install` copies it to
-//! ~/Applications so it opens from the Dock and Spotlight).
+//! Repository tasks: `cargo xtask ci` (every gate), `cargo xtask icon` (render the app icon),
+//! `cargo xtask bundle [--install]` (build and sign PodDojo.app for macOS; `--install` copies it to
+//! ~/Applications so it opens from the Dock and Spotlight) and `cargo xtask release` (gates, bundle,
+//! zip and checksums in `target/release-assets`, ready to upload).
+//!
+//! Signing: ad-hoc by default. With `PODDOJO_SIGN_IDENTITY="Developer ID Application: …"` the app is
+//! signed with the hardened runtime, and with `PODDOJO_NOTARY_PROFILE=<notarytool keychain profile>`
+//! it is also notarised and stapled, so it opens without any Gatekeeper warning.
 
 use std::process::{Command, ExitCode};
 
@@ -10,7 +15,8 @@ fn main() -> ExitCode {
         Some("ci") => ci(),
         Some("icon") => icon(),
         Some("bundle") => bundle(args.iter().any(|a| a == "--install")),
-        _ => Err("usage: cargo xtask <ci|icon|bundle [--install]>".to_string()),
+        Some("release") => release(),
+        _ => Err("usage: cargo xtask <ci|icon|bundle [--install]|release>".to_string()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -103,6 +109,7 @@ fn bundle(install: bool) -> Result<(), String> {
     }
     let icns = contents.join("Resources/PodDojo.icns");
     step("icns", "iconutil", &["-c", "icns", &iconset.display().to_string(), "-o", &icns.display().to_string()])?;
+    sign(app)?;
     eprintln!("built {}", app.display());
     if install {
         let home = std::env::var("HOME").map_err(|e| e.to_string())?;
@@ -116,5 +123,71 @@ fn bundle(install: bool) -> Result<(), String> {
         eprintln!("installed {} (open it from Spotlight or the Dock)", dest.display());
         eprintln!("the CLI is inside it: ln -sf \"{}/Contents/MacOS/dojo\" /usr/local/bin/dojo", dest.display());
     }
+    Ok(())
+}
+
+/// Sign the bundle: inner binaries first, then the app. Ad-hoc unless a Developer ID is configured.
+fn sign(app: &std::path::Path) -> Result<(), String> {
+    let identity = std::env::var("PODDOJO_SIGN_IDENTITY").ok().filter(|s| !s.trim().is_empty());
+    let id = identity.as_deref().unwrap_or("-");
+    let mut base = vec!["--force", "--sign", id];
+    if identity.is_some() {
+        base.extend(["--options", "runtime", "--timestamp"]);
+    }
+    for bin in ["dojo", "poddojo"] {
+        let path = app.join("Contents/MacOS").join(bin).display().to_string();
+        let mut args = base.clone();
+        args.push(&path);
+        step(&format!("sign {bin}"), "codesign", &args)?;
+    }
+    let path = app.display().to_string();
+    let mut args = base.clone();
+    args.push(&path);
+    step("sign app", "codesign", &args)?;
+    step("verify signature", "codesign", &["--verify", "--strict", "--deep", &path])?;
+    if identity.is_none() {
+        eprintln!("signed ad-hoc (set PODDOJO_SIGN_IDENTITY for a Developer ID signature)");
+    }
+    Ok(())
+}
+
+/// Gates, a signed bundle, the zip and its checksum: everything a GitHub release needs.
+fn release() -> Result<(), String> {
+    ci()?;
+    bundle(false)?;
+    let version = env!("CARGO_PKG_VERSION");
+    let arch = match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        other => other,
+    };
+    let out = std::path::Path::new("target/release-assets");
+    let _ = std::fs::remove_dir_all(out);
+    std::fs::create_dir_all(out).map_err(|e| e.to_string())?;
+    let name = format!("PodDojo-v{version}-macos-{arch}.zip");
+    let zip = out.join(&name).display().to_string();
+    step("zip", "ditto", &["-c", "-k", "--keepParent", "target/bundle/PodDojo.app", &zip])?;
+    if let Ok(profile) = std::env::var("PODDOJO_NOTARY_PROFILE")
+        && !profile.trim().is_empty()
+    {
+        step("notarise", "xcrun", &["notarytool", "submit", &zip, "--keychain-profile", &profile, "--wait"])?;
+        step("staple", "xcrun", &["stapler", "staple", "target/bundle/PodDojo.app"])?;
+        // Re-zip so the download carries the stapled ticket.
+        step("zip (stapled)", "ditto", &["-c", "-k", "--keepParent", "target/bundle/PodDojo.app", &zip])?;
+    }
+    let sums = Command::new("shasum")
+        .args(["-a", "256", &name])
+        .current_dir(out)
+        .output()
+        .map_err(|e| format!("shasum: {e}"))?;
+    if !sums.status.success() {
+        return Err("shasum failed".into());
+    }
+    std::fs::write(out.join("SHA256SUMS.txt"), &sums.stdout).map_err(|e| e.to_string())?;
+    eprintln!("── release assets in {}:", out.display());
+    eprint!("{}", String::from_utf8_lossy(&sums.stdout));
+    eprintln!(
+        "publish: gh release create v{version} --target main --title \"PodDojo v{version}\" --notes-file <notes> \\\n  {zip} {}/SHA256SUMS.txt",
+        out.display()
+    );
     Ok(())
 }

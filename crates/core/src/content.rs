@@ -276,6 +276,30 @@ pub struct Catalog {
     pub tracks: Vec<Track>,
     pub lessons: BTreeMap<String, Lesson>,
     pub exams: Vec<Exam>,
+    /// The in-app reference (cheat sheets and YAML templates), in `order`.
+    pub reference: Vec<RefPage>,
+}
+
+/// A reference page: dense, copy-ready material to keep open while practising, the in-app
+/// counterpart of the kubernetes.io pages allowed in the exam.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RefPage {
+    pub id: String,
+    pub title: String,
+    pub order: u32,
+    pub summary: String,
+    pub body: String,
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RefFrontMatter {
+    id: String,
+    title: String,
+    order: u32,
+    #[serde(default)]
+    summary: String,
 }
 
 /// Split `+++\n<toml>\n+++\n<markdown>`.
@@ -323,6 +347,7 @@ impl Catalog {
         let mut tracks: Vec<(String, TrackFile)> = Vec::new();
         let mut lessons: Vec<Lesson> = Vec::new();
         let mut exams: Vec<(String, Exam)> = Vec::new();
+        let mut reference: Vec<RefPage> = Vec::new();
         let mut files: Vec<(String, String)> = files.into_iter().collect();
         files.sort();
         let err = |path: &str, message: String| ContentError { path: path.to_string(), message };
@@ -334,6 +359,29 @@ impl Catalog {
                     Ok(e) => exams.push((path.clone(), e)),
                     Err(e) => errors.push(err(path, e.to_string())),
                 },
+                ["reference", name] if name.ends_with(".md") => {
+                    let parsed = split_front_matter(text)
+                        .ok_or_else(|| "missing `+++` TOML front matter".to_string())
+                        .and_then(|(fm, body)| {
+                            toml::from_str::<RefFrontMatter>(fm).map(|f| (f, body)).map_err(|e| e.to_string())
+                        });
+                    match parsed {
+                        Ok((f, body)) if f.id.starts_with("ref-") && !body.trim().is_empty() => {
+                            reference.push(RefPage {
+                                id: f.id,
+                                title: f.title,
+                                order: f.order,
+                                summary: f.summary,
+                                body: body.trim().to_string(),
+                                path: path.clone(),
+                            })
+                        }
+                        Ok(_) => {
+                            errors.push(err(path, "reference ids start with `ref-` and the page needs a body".into()))
+                        }
+                        Err(e) => errors.push(err(path, e)),
+                    }
+                }
                 [_, "track.toml"] => match toml::from_str::<TrackFile>(text) {
                     Ok(t) => tracks.push((path.clone(), t)),
                     Err(e) => errors.push(err(path, e.to_string())),
@@ -434,11 +482,25 @@ impl Catalog {
         }
         catalog.exams.sort_by(|a, b| a.id.cmp(&b.id));
 
+        // Reference.
+        let mut ref_ids = BTreeSet::new();
+        for page in &reference {
+            if !ref_ids.insert(page.id.clone()) {
+                errors.push(err(&page.path, format!("duplicate reference id `{}`", page.id)));
+            }
+        }
+        reference.sort_by(|a, b| a.order.cmp(&b.order).then(a.id.cmp(&b.id)));
+        catalog.reference = reference;
+
         if errors.is_empty() { Ok(catalog) } else { Err(errors) }
     }
 
     pub fn lesson(&self, id: &str) -> Option<&Lesson> {
         self.lessons.get(id)
+    }
+
+    pub fn reference_page(&self, id: &str) -> Option<&RefPage> {
+        self.reference.iter().find(|p| p.id == id)
     }
 
     pub fn exam(&self, id: &str) -> Option<&Exam> {

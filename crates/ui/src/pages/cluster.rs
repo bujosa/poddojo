@@ -216,11 +216,18 @@ impl App {
             });
         });
         ui.add_space(6.0);
-        super::split_left(ui, 170.0, |ui, left| {
+        super::split_left(ui, 220.0, |ui, left| {
             if left {
                 egui::ScrollArea::vertical().id_salt("kinds").show(ui, |ui| {
+                    ui.label(RichText::new("RESOURCE · SHORT NAME").size(11.0).strong().color(t.muted));
                     for kind in explore::KINDS {
-                        if ui.selectable_label(self.kube.kind == *kind, *kind).clicked() {
+                        let short = explore::short_name(kind);
+                        let label = if short.is_empty() { kind.to_string() } else { format!("{kind}  ·  {short}") };
+                        if ui
+                            .selectable_label(self.kube.kind == *kind, label)
+                            .on_hover_text(format!("kubectl get {}", if short.is_empty() { kind } else { short }))
+                            .clicked()
+                        {
                             self.kube.kind = kind.to_string();
                             self.kube.objects.clear();
                             self.kube.selected = None;

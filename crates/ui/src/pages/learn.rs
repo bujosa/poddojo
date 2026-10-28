@@ -556,13 +556,16 @@ impl App {
     }
 
     fn submit_quiz(&mut self, l: &Lesson) {
-        let correct = l.quiz.iter().zip(&self.learn.answers).filter(|(q, a)| **a == Some(q.answer)).count() as u32;
-        let score = QuizScore { correct, total: l.quiz.len() as u32 };
-        self.progress.record_quiz(l, score, now());
+        let score = self.progress.record_quiz_answers(l, &self.learn.answers, now());
         self.save_progress();
         self.learn.submitted = true;
         self.toast(
-            format!("Quiz: {correct}/{}{}", l.quiz.len(), if score.passed() { " · passed" } else { " · 70% needed" }),
+            format!(
+                "Quiz: {}/{}{}",
+                score.correct,
+                score.total,
+                if score.passed() { " · passed" } else { " · 70% needed · misses come back in Review" }
+            ),
             score.passed(),
         );
     }
@@ -646,7 +649,8 @@ impl App {
             theme::card(t).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.label(RichText::new(format!("QUESTION {}", i + 1)).size(11.5).strong().color(t.muted));
-                ui.label(RichText::new(&q.q).size(16.5).strong().color(strong(t)));
+                let w = ui.available_width();
+                ui.label(crate::markdown::inline_job(&q.q, 16.5, strong(t), t.card_hover, w));
                 ui.add_space(8.0);
                 let picked_now = self.learn.answers.get(i).copied().flatten();
                 for (pos, j) in q.order(&l.id).into_iter().enumerate() {
@@ -701,24 +705,7 @@ impl App {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_enabled_ui(all, |ui| {
                             if accent_button(ui, t, "Submit answers").clicked() {
-                                let correct = l
-                                    .quiz
-                                    .iter()
-                                    .zip(&self.learn.answers)
-                                    .filter(|(q, a)| **a == Some(q.answer))
-                                    .count() as u32;
-                                let score = QuizScore { correct, total: l.quiz.len() as u32 };
-                                self.progress.record_quiz(l, score, now());
-                                self.save_progress();
-                                self.learn.submitted = true;
-                                self.toast(
-                                    format!(
-                                        "Quiz: {correct}/{}{}",
-                                        l.quiz.len(),
-                                        if score.passed() { " · passed" } else { " · 70% needed" }
-                                    ),
-                                    score.passed(),
-                                );
+                                self.submit_quiz(l);
                             }
                         });
                     });

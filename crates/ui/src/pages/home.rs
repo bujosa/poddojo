@@ -23,6 +23,7 @@ impl App {
 
             self.continue_card(ui, &t);
             ui.add_space(12.0);
+            self.review_strip(ui, &t);
             self.labs_card(ui, &t);
 
             ui.columns(2, |cols| {
@@ -218,38 +219,105 @@ impl App {
         ui.add_space(12.0);
     }
 
-    fn readiness_card(&mut self, ui: &mut egui::Ui, t: &Tokens) {
-        theme::card(t).show(ui, |ui| {
+    /// Due reviews, when there are any: the daily habit that keeps what was learned.
+    fn review_strip(&mut self, ui: &mut egui::Ui, t: &Tokens) {
+        let stats = self.progress.deck.stats(&self.catalog, poddojo_core::now());
+        let due = stats.due_questions + stats.due_tasks;
+        if due == 0 {
+            return;
+        }
+        theme::card(t).stroke(egui::Stroke::new(1.2, t.amber.gamma_multiply(0.7))).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            let overall = self.progress.overall_readiness(&self.catalog);
             ui.horizontal(|ui| {
-                ui.label(RichText::new("CKAD readiness").strong());
+                crate::icons::show(ui, crate::icons::Icon::Repeat, 24.0, t.amber);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(format!("{due} due for review")).size(16.0).strong());
+                    let mut parts = Vec::new();
+                    if stats.due_questions > 0 {
+                        parts.push(format!("{} question(s)", stats.due_questions));
+                    }
+                    if stats.due_tasks > 0 {
+                        parts.push(format!("{} mock-exam task drill(s)", stats.due_tasks));
+                    }
+                    ui.label(
+                        RichText::new(format!("{}: a few minutes now saves relearning later.", parts.join(" and ")))
+                            .size(12.5)
+                            .color(t.muted),
+                    );
+                });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(RichText::new(format!("{overall:.0}%")).size(22.0).strong().color(if overall >= 66.0 {
-                        t.good
-                    } else {
-                        t.amber
-                    }));
+                    if accent_button(ui, t, "Review now").clicked() {
+                        self.page = Page::Review;
+                        if stats.due_questions > 0 {
+                            self.start_session(false);
+                        }
+                    }
                 });
             });
+        });
+        ui.add_space(12.0);
+    }
+
+    fn readiness_card(&mut self, ui: &mut egui::Ui, t: &Tokens) {
+        use poddojo_core::Verdict;
+        let r = self.progress.exam_readiness(&self.catalog);
+        theme::card(t).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            let color = match r.verdict {
+                Verdict::Ready => t.good,
+                Verdict::Close => t.accent,
+                Verdict::NotYet => t.amber,
+                Verdict::KeepStudying | Verdict::TakeAMock => t.muted,
+            };
+            ui.label(RichText::new("WOULD YOU PASS THE CKAD TODAY?").size(11.5).strong().color(t.muted));
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(r.verdict.title()).size(22.0).strong().color(color));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| match r.recent {
+                    Some(p) => {
+                        ui.label(RichText::new("recent fresh mocks").size(11.5).color(t.muted));
+                        ui.label(RichText::new(format!("{p:.0}%")).size(22.0).strong().color(color));
+                    }
+                    None => {
+                        ui.label(RichText::new("no mock yet").size(11.5).color(t.muted));
+                    }
+                });
+            });
+            ui.label(RichText::new(&r.advice).size(13.0));
+            ui.add_space(6.0);
             ui.label(
                 RichText::new(format!(
-                    "Weighted like the exam (curriculum {}). Lessons count half, mock exams the other half.",
-                    poddojo_core::CKAD_CURRICULUM_VERSION
+                    "Curriculum {:.0}% · {} of {} mocks taken fresh · pass mark 66%, aim for 80%",
+                    r.coverage,
+                    r.fresh.len(),
+                    self.catalog.exams.len()
                 ))
-                .small()
+                .size(12.0)
                 .color(t.muted),
             );
-            ui.add_space(4.0);
+            ui.add_space(6.0);
             let w = (ui.available_width() - 8.0).max(80.0);
-            for r in self.progress.readiness(&self.catalog) {
+            for d in self.progress.readiness(&self.catalog) {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(&r.title).size(13.0));
+                    ui.label(RichText::new(&d.title).size(13.0));
+                    if d.weak() {
+                        theme::chip(ui, "weak", t.amber, t.amber.gamma_multiply(0.12));
+                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(RichText::new(format!("{}% of exam", r.weight)).size(11.0).color(t.muted));
+                        let exam = d.recent_exam.map_or("no mock".to_string(), |e| format!("mocks {e:.0}%"));
+                        ui.label(
+                            RichText::new(format!(
+                                "{}/{} lessons · {exam} · {}% of exam",
+                                d.lessons_done, d.lessons_total, d.weight
+                            ))
+                            .size(11.0)
+                            .color(t.muted),
+                        );
                     });
                 });
-                theme::bar(ui, t, r.score(), w, t.accent);
+                theme::bar(ui, t, d.coverage(), w, t.accent);
+                if let Some(e) = d.recent_exam {
+                    theme::bar(ui, t, e / 100.0, w, if d.weak() { t.amber } else { t.good });
+                }
             }
         });
     }

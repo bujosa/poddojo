@@ -17,7 +17,7 @@ why = "The kubelet can expose the previous container instance after a restart. I
 q = "Why might kubectl logs -l app=dojo-stream show less history than expected?"
 choices = ["Selector logs read only Pods that are Ready", "Selector-based logs default to a limited tail unless overridden", "Selector logs skip Pods older than one hour", "Selector logs show only the newest Pod"]
 answer = 1
-why = "Specify --tail explicitly, such as --tail=100 or --tail=-1, when selecting multiple Pods. Also choose containers deliberately and use --prefix to identify the source."
+why = "With a label selector, logs defaults to the last 10 lines per container, rather than all available lines. Set --tail explicitly, choose containers deliberately, and use --prefix to identify the source."
 
 [[quiz]]
 q = "What does a 100m CPU usage reading mean?"
@@ -32,7 +32,7 @@ answer = 1
 why = "Metrics collection is an optional cluster capability. Check discovery, APIService health, metrics-server Pods, certificates, and permissions before interpreting absent data as application behavior."
 
 [[quiz]]
-q = "Which selector finds only events for one named Pod?"
+q = "Within a namespace, which selector filters core/v1 Events by Pod kind and name?"
 choices = ["-l pod=NAME always works", "--field-selector involvedObject.kind=Pod,involvedObject.name=NAME on get events", "--field-selector metadata.name=NAME on get events", "-l involvedObject.name=NAME on get events"]
 answer = 1
 why = "Field selectors target supported API fields. Event involvedObject fields differ from arbitrary labels, and supported selectors vary by resource kind."
@@ -246,9 +246,21 @@ kubectl -n logs-monitoring-lab logs -l app=dojo-stream \
 kubectl -n logs-monitoring-lab logs dojo-crash -c main --previous --tail=30
 ```
 
-A Deployment resource argument conveniently selects a Pod belonging to that workload. Do not assume `logs deployment/NAME` aggregates every replica automatically. Use a label selector or the appropriate all-Pods option when aggregation is required, and distinguish aggregation across Pods from `--all-containers`, which addresses container selection within each Pod.
+A Deployment resource argument selects one Pod belonging to that workload by default. Use a label selector or `--all-pods=true` with the Deployment when aggregation is required. Distinguish aggregation across Pods from `--all-containers`, which addresses container selection within each Pod.
 
-For multi-container Pods, `-c NAME` is the clearest choice for one source. `--all-containers=true` includes all applicable containers. `--prefix` identifies the Pod and container on each line, which matters when identical messages come from several replicas. Selector-based logging has its own default tail limit; specify `--tail` deliberately. `--tail=-1` requests all available lines, but available logs remain limited by runtime retention and rotation.
+For multi-container Pods, `-c NAME` is the clearest choice for one source. `--all-containers=true` includes all applicable containers. `--prefix` identifies the Pod and container on each line, which matters when identical messages come from several replicas. The default tail is 10 lines with a label selector and all lines without one. `--tail=-1` requests all available lines, but `kubectl logs` exposes only the latest log file, not every rotated file. See the [logs reference](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_logs/) for these defaults.
+
+Container names come from the Pod template, for example this fragment:
+
+```yaml
+spec:
+  containers:
+  - name: main
+    image: busybox:1.36
+    command: [sh, -c, 'while true; do echo "main tick"; sleep 2; done']
+```
+
+The shell's echo reaches standard output; the container's name supplies `-c main`.
 
 `--since=10m` filters to a recent duration. `--since-time` accepts an absolute timestamp when comparing an incident window. `--timestamps` adds log timestamps for correlation. Avoid collecting huge outputs when a bounded window answers the question, and do not paste private application data into shared notes.
 
@@ -291,7 +303,7 @@ Labels describe arbitrary application groupings: `-l app=dojo-stream` selects th
 
 `kubectl top` needs a working Metrics API, usually provided by metrics-server. It is not installed in every cluster. This lab installs the official, pinned metrics-server v0.8.0 `components.yaml` into the lab cluster's `kube-system` namespace, unchanged except for `--kubelet-insecure-tls`, which kind needs because its kubelets use self-signed certificates. That flag disables kubelet certificate verification: a lab accommodation, never production guidance.
 
-metrics-server is a cluster add-on, so it stays installed after the lab (later lessons and exams can use it) and setup leaves an existing installation alone. The Metrics API is registered as the APIService `v1beta1.metrics.k8s.io`; APIService names encode their version and group. Your workloads run in the lesson namespace.
+metrics-server is a cluster add-on, so it stays installed after the lab and setup leaves an existing installation alone. Kubernetes v1.37 introduces stable `metrics.k8s.io/v1`, while `v1beta1` remains usable during transition. The pinned metrics-server v0.8.0 serves `v1beta1`, registering APIService `v1beta1.metrics.k8s.io`; do not assume every provider serves `v1`. Discover the installed versions with `kubectl api-versions` and inspect registration with `kubectl get apiservices`. See the [v1.37 release notes](https://kubernetes.io/blog/2026/08/26/kubernetes-v1-37-release/) and [metrics-server compatibility matrix](https://github.com/kubernetes-sigs/metrics-server#compatibility-matrix). Your workloads run in the lesson namespace.
 
 ```bash
 kubectl -n logs-monitoring-lab top pods -l app=dojo-stream

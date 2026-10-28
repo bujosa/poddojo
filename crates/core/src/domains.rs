@@ -7,6 +7,8 @@
 pub struct Domain {
     pub id: &'static str,
     pub title: &'static str,
+    /// A short name for tight spaces.
+    pub short: &'static str,
     /// Share of the real exam, in percent.
     pub weight: u32,
     pub competencies: &'static [&'static str],
@@ -18,6 +20,7 @@ pub const DOMAINS: &[Domain] = &[
     Domain {
         id: "design-build",
         title: "Application Design and Build",
+        short: "Design & Build",
         weight: 20,
         competencies: &[
             "Define, build and modify container images",
@@ -29,6 +32,7 @@ pub const DOMAINS: &[Domain] = &[
     Domain {
         id: "deployment",
         title: "Application Deployment",
+        short: "Deployment",
         weight: 20,
         competencies: &[
             "Use Kubernetes primitives to implement common deployment strategies (e.g. blue/green or canary)",
@@ -40,6 +44,7 @@ pub const DOMAINS: &[Domain] = &[
     Domain {
         id: "observability",
         title: "Application Observability and Maintenance",
+        short: "Observability",
         weight: 15,
         competencies: &[
             "Understand API deprecations",
@@ -52,6 +57,7 @@ pub const DOMAINS: &[Domain] = &[
     Domain {
         id: "config-security",
         title: "Application Environment, Configuration and Security",
+        short: "Config & Security",
         weight: 25,
         competencies: &[
             "Discover and use resources that extend Kubernetes (CRD, Operators)",
@@ -67,6 +73,7 @@ pub const DOMAINS: &[Domain] = &[
     Domain {
         id: "networking",
         title: "Services and Networking",
+        short: "Networking",
         weight: 20,
         competencies: &[
             "Demonstrate basic understanding of NetworkPolicies",

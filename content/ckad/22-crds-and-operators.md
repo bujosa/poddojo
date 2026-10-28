@@ -32,8 +32,8 @@ answer = 1
 why = "The API can serve multiple versions, but exactly one version is used for new persisted representations. Changing the storage version does not automatically rewrite every existing object, and conversion may require additional implementation."
 
 [[quiz]]
-q = "Which command discovers resource types in this lab's custom group?"
-choices = ["kubectl get pods --api-group=dojo.example.com", "kubectl api-resources --api-group=dojo.example.com", "kubectl explain --api-version=dojo.example.com/v1", "kubectl api-versions"]
+q = "Which command lists resource types and namespace scope for this lab's custom API group?"
+choices = ["kubectl -n crd-lab get dojo-backups.dojo.example.com", "kubectl api-resources --api-group=dojo.example.com", "kubectl explain dojo-backups.spec --api-version=dojo.example.com/v1", "kubectl api-versions"]
 answer = 1
 why = "api-resources queries discovery and shows names, kinds, versions and whether resources are namespaced. get crd lists definitions, while get dojo-backups lists instances of the custom resource."
 
@@ -257,7 +257,7 @@ schema:
             default: 7
 ```
 
-Types reject incompatible input; bounds reject values outside the contract; defaults supply omitted values. A schema that validates `retentionDays` as an integer does not understand whether a particular database exists. Semantic validation may need CEL rules, admission or controller logic. Unknown fields are normally pruned unless the schema explicitly preserves them in an allowed region, so a misspelled field can disappear rather than becoming working configuration.
+Types reject incompatible input; bounds reject values outside the contract; defaults supply omitted values. The lab adds `paused: {type: boolean, default: false}` alongside retentionDays. A schema that validates retention as an integer does not understand whether a database exists. Semantic validation may need CEL rules, admission or controller logic. Unknown fields are normally pruned unless explicitly preserved, but strict field validation can reject the request first. Do not rely on a misspelled field being silently discarded.
 
 Descriptions improve `explain` output. Add constraints that reflect a real contract, not arbitrary restrictions that make future versions unusable. Preserve compatibility when existing custom objects may still carry earlier valid values.
 
@@ -266,6 +266,8 @@ Descriptions improve `explain` output. Add constraints that reflect a real contr
 `served: true` exposes a version to clients. Exactly one version has `storage: true`, selecting the persisted representation for new writes. Serving multiple versions can require conversion; changing the storage marker alone neither performs arbitrary semantic conversion nor migrates every existing stored object. Version migration is operational work beyond creating a second YAML entry.
 
 `additionalPrinterColumns` controls the default table display. Each column has a name, type and JSONPath such as `.spec.retentionDays`. It improves `kubectl get`; it does not create or compute the underlying field. A missing value produces an empty cell rather than reconciling desired state.
+
+On the version entry, `subresources: {status: {}}` enables `/status`. Define `status` as an object in the same version's schema, with `phase: {type: string}` and `observedGeneration: {type: integer, format: int64}` as properties. Keep that schema separate from `spec`; defining the endpoint and fields still does not populate them.
 
 The optional `status` subresource separates desired-state updates from observed-state reports. With it enabled, ordinary writes do not manage status as if it were user configuration; a controller uses the status endpoint with suitable permissions. `status.observedGeneration` commonly records which desired-state generation the controller processed, but the CRD does not maintain that field automatically. Conditions and phase conventions also need controller implementation.
 
@@ -279,4 +281,4 @@ Reconciliation must tolerate duplicate observations, interrupted work and contro
 
 ## Exam tips
 
-Start with discovery, then read the CRD's scope, served version and schema. Create the exact required custom object using its own group/version. For changes, use an updated manifest, JSON merge patch with `--type=merge`, or JSON patch; custom resources do not support strategic merge patch. Check spec acceptance separately from controller status. Deleting a CRD removes its API and its stored custom objects, so cleanup must target only the definition owned by your exercise.
+Start with discovery, then read the CRD's scope, served version and schema. Create the exact required custom object using its own group/version. For changes, use an updated manifest, JSON merge patch with `--type=merge`, or JSON patch; custom resources do not support strategic merge patch. For example, `kubectl -n crd-lab patch dojo-backups.dojo.example.com nightly --type=merge -p '{"spec":{"paused":true}}'` changes one desired-state field. Check spec acceptance separately from controller status. The [CRD guide](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/) covers schema and status behavior. Deleting a CRD removes its API and stored custom objects, so cleanup must target only your exercise's definition.

@@ -110,7 +110,7 @@ equals = "ok"
 
 ## A name is an address, not the image itself
 
-An image reference tells the engine where to find content and which version to request. Learn to read it from left to right before debugging a failed pull. The general form is `registry/namespace/repository:tag@digest`; namespace is a convention within the repository path, and there may be several path components. A tag or a digest can appear alone. When both appear, the digest selects the content.
+An image reference tells the engine where to find content and which version to request. Learn to read it from left to right before debugging a failed pull. The general form is `registry/namespace/repository:tag@digest`; namespace is a convention within the repository path, and there may be several path components. The repository may be followed by a tag, a digest, or both. When both appear, the digest selects the content.
 
 ```text
 localhost:15000 / dojo / registry-demo : v1
@@ -147,7 +147,7 @@ For a release, record the digest printed by the successful push. Treat promotion
 
 A registry stores content-addressed blobs and manifests. A manifest describes the image configuration and filesystem layers. A multi-platform index points to platform-specific manifests, allowing one reference to support both an ARM laptop and an x86 server. The engine chooses a compatible platform. An index digest and one of its child manifest digests identify different objects, so they need not match.
 
-A local image ID usually identifies the image configuration, not the registry manifest. Do not take the value of `docker image inspect -f '{{.Id}}'` and paste it after a repository's `@` as though it were a registry digest. Inspect `RepoDigests` or use the digest returned by the registry operation. The relationship is explained in [Docker's digest documentation](https://docs.docker.com/dhi/explore/security-concepts/digests/).
+With classic Docker storage, a local image ID identifies the image configuration; with the containerd store it can instead identify a manifest or index. Its meaning depends on the backend, so it is not a portable substitute for a verified repository digest. Do not take the value of `docker image inspect -f '{{.Id}}'` and paste it after a repository's `@` as though it were a registry digest. Use the digest returned by a successful push or confirmed by a pull. `RepoDigests` can help find that reference, but on the containerd store an entry can exist before the corresponding repository has been pushed. The relationship is explained in [Docker's digest documentation](https://docs.docker.com/dhi/explore/security-concepts/digests/).
 
 ```bash
 docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' \

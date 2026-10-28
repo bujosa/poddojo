@@ -1,0 +1,3043 @@
+# Original PodDojo practice tasks; not recalled or official exam questions.
+id = "ckad-mock-4"
+title = "CKAD Mock Exam 4 (exam day)"
+summary = "Seventeen independent incident and delivery tasks: diagnose existing failures, preserve working contracts, and submit evidence under exam-day time pressure. Original practice, not official or recalled questions."
+minutes = 120
+pass_percent = 66
+requires = ["ingress-controller"]
+setup = [
+'''kubectl create namespace mock4-q01 --dry-run=client -o yaml | kubectl apply -f -''',
+'''kubectl create namespace mock4-q02 --dry-run=client -o yaml | kubectl apply -f -''',
+'''kubectl create namespace mock4-q03 --dry-run=client -o yaml | kubectl apply -f -''',
+'''kubectl create namespace mock4-q04 --dry-run=client -o yaml | kubectl apply -f -''',
+'''kubectl create namespace mock4-q05 --dry-run=client -o yaml | kubectl apply -f -''',
+'''kubectl create namespace mock4-q06 --dry-run=client -o yaml | kubectl apply -f -''',
+'''kubectl create namespace mock4-q07 --dry-run=client -o yaml | kubectl apply -f -''',
+'''kubectl create namespace mock4-q08 --dry-run=client -o yaml | kubectl apply -f -''',
+'''kubectl create namespace mock4-q09 --dry-run=client -o yaml | kubectl apply -f -''',
+'''kubectl create namespace mock4-q10 --dry-run=client -o yaml | kubectl apply -f -''',
+'''kubectl create namespace mock4-q11 --dry-run=client -o yaml | kubectl apply -f -''',
+'''kubectl create namespace mock4-q12 --dry-run=client -o yaml | kubectl apply -f -''',
+'''kubectl create namespace mock4-q13 --dry-run=client -o yaml | kubectl apply -f -''',
+'''kubectl create namespace mock4-q14 --dry-run=client -o yaml | kubectl apply -f -''',
+'''kubectl create namespace mock4-q15 --dry-run=client -o yaml | kubectl apply -f -''',
+'''kubectl create namespace mock4-q16 --dry-run=client -o yaml | kubectl apply -f -''',
+'''kubectl create namespace mock4-q17 --dry-run=client -o yaml | kubectl apply -f -''',
+'''kubectl create namespace mock4-q17-source --dry-run=client -o yaml | kubectl apply -f -'''
+]
+cleanup = [
+'''kubectl delete namespace mock4-q01 --ignore-not-found --wait=true --timeout=120s || true''',
+'''kubectl delete namespace mock4-q02 --ignore-not-found --wait=true --timeout=120s || true''',
+'''kubectl delete namespace mock4-q03 --ignore-not-found --wait=true --timeout=120s || true''',
+'''kubectl delete namespace mock4-q04 --ignore-not-found --wait=true --timeout=120s || true''',
+'''kubectl delete namespace mock4-q05 --ignore-not-found --wait=true --timeout=120s || true''',
+'''kubectl delete namespace mock4-q06 --ignore-not-found --wait=true --timeout=120s || true''',
+'''kubectl delete namespace mock4-q07 --ignore-not-found --wait=true --timeout=120s || true''',
+'''kubectl delete namespace mock4-q08 --ignore-not-found --wait=true --timeout=120s || true''',
+'''kubectl delete namespace mock4-q09 --ignore-not-found --wait=true --timeout=120s || true''',
+'''kubectl delete namespace mock4-q10 --ignore-not-found --wait=true --timeout=120s || true''',
+'''kubectl delete namespace mock4-q11 --ignore-not-found --wait=true --timeout=120s || true''',
+'''kubectl delete namespace mock4-q12 --ignore-not-found --wait=true --timeout=120s || true''',
+'''kubectl delete namespace mock4-q13 --ignore-not-found --wait=true --timeout=120s || true''',
+'''kubectl delete namespace mock4-q14 --ignore-not-found --wait=true --timeout=120s || true''',
+'''kubectl delete namespace mock4-q15 --ignore-not-found --wait=true --timeout=120s || true''',
+'''kubectl delete namespace mock4-q16 --ignore-not-found --wait=true --timeout=120s || true''',
+'''kubectl delete namespace mock4-q17 --ignore-not-found --wait=true --timeout=120s || true''',
+'''kubectl delete namespace mock4-q17-source --ignore-not-found --wait=true --timeout=120s || true''',
+'''docker image rm dojo/mock4-digest:v1 >/dev/null 2>&1 || true''',
+'''test -n "${PODDOJO_LAB_DIR:-}" && rm -rf -- "$PODDOJO_LAB_DIR/m4-image" "$PODDOJO_LAB_DIR/m4-chart" "$PODDOJO_LAB_DIR/m4-kustomize" "$PODDOJO_LAB_DIR"/m4-*.txt "$PODDOJO_LAB_DIR"/m4-*.yaml "$PODDOJO_LAB_DIR"/m4-*.env "$PODDOJO_LAB_DIR"/m4-*.conf || true'''
+]
+
+[[tasks]]
+id = "q01"
+domain = "design-build"
+weight = 6
+title = "Ship a non-root batch digest image"
+namespace = "mock4-q01"
+task = '''In `mock4-q01`, package an integrity-check utility as `dojo/mock4-digest:v1`. Create its Dockerfile and build context under `$PODDOJO_LAB_DIR/m4-image`, using `busybox:1.36`. Include `/work/input.txt` containing exactly `warehouse=west` followed by one newline. The image itself must default to numeric UID 1200 and run a script that prints `uid=<actual id -u>` then `sha256sum /work/input.txt`. Load the image into kind `poddojo`, without pushing it. Create Job `digest`, backoffLimit 0, restartPolicy Never, using that image with IfNotPresent, runAsNonRoot and a read-only root filesystem. Do not override the image command or runtime UID in the Job. Keep the completed Job and capture its real logs in `$PODDOJO_LAB_DIR/m4-digest.txt`.'''
+solution = '''```bash
+mkdir -p "$PODDOJO_LAB_DIR/m4-image"
+printf 'warehouse=west\n' > "$PODDOJO_LAB_DIR/m4-image/input.txt"
+cat > "$PODDOJO_LAB_DIR/m4-image/digest.sh" <<'EOF'
+#!/bin/sh
+set -eu
+printf 'uid=%s\n' "$(id -u)"
+sha256sum /work/input.txt
+EOF
+cat > "$PODDOJO_LAB_DIR/m4-image/Dockerfile" <<'EOF'
+FROM busybox:1.36
+WORKDIR /work
+COPY --chown=1200:1200 input.txt digest.sh ./
+RUN chmod 0555 /work/digest.sh && chmod 0444 /work/input.txt
+USER 1200
+ENTRYPOINT ["/work/digest.sh"]
+EOF
+docker build -t dojo/mock4-digest:v1 "$PODDOJO_LAB_DIR/m4-image"
+kind load docker-image dojo/mock4-digest:v1 --name poddojo
+kubectl -n mock4-q01 apply -f - <<'EOF'
+apiVersion: batch/v1
+kind: Job
+metadata: {name: digest}
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: digest
+        image: dojo/mock4-digest:v1
+        imagePullPolicy: IfNotPresent
+        securityContext: {runAsNonRoot: true, readOnlyRootFilesystem: true}
+EOF
+kubectl -n mock4-q01 wait --for=condition=complete job/digest --timeout=120s
+kubectl -n mock4-q01 logs job/digest > "$PODDOJO_LAB_DIR/m4-digest.txt"
+```'''
+
+[[tasks.checks]]
+name = '''Image defaults to UID 1200'''
+run = '''u=$(docker image inspect dojo/mock4-digest:v1 --format '{{.Config.User}}') || exit 1; case "$u" in 1200|1200:*) echo ok;; *) exit 1;; esac'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''The hardened Job completes using the loaded image'''
+run = '''kubectl -n mock4-q01 wait --for=condition=complete job/digest --timeout=60s >/dev/null || exit 1
+v=$(kubectl -n mock4-q01 get job digest -o jsonpath='{.spec.backoffLimit}|{.spec.template.spec.restartPolicy}|{.spec.template.spec.containers[0].image}|{.spec.template.spec.containers[0].imagePullPolicy}|{.spec.template.spec.containers[0].securityContext.runAsNonRoot}|{.spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem}|{.spec.template.spec.containers[0].command}|{.spec.template.spec.containers[0].args}|{.spec.template.spec.containers[0].securityContext.runAsUser}|{.spec.template.spec.securityContext.runAsUser}')
+[ "$v" = '0|Never|dojo/mock4-digest:v1|IfNotPresent|true|true||||' ] && echo ok'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''Real execution reports its UID and the correct file digest'''
+run = '''for i in $(seq 1 30); do v=$(kubectl -n mock4-q01 logs job/digest 2>/dev/null) && [ "$v" = 'uid=1200
+e8fc058b9d4faed7f6de5b0221c629785638c5318ac0be11b72dd3f11fe902b9  /work/input.txt' ] && echo ok && exit 0; sleep 2; done; exit 1'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''Submitted evidence matches the successful Job logs'''
+run = '''test "$(cat "$PODDOJO_LAB_DIR/m4-digest.txt")" = 'uid=1200
+e8fc058b9d4faed7f6de5b0221c629785638c5318ac0be11b72dd3f11fe902b9  /work/input.txt' && test "$(kubectl -n mock4-q01 logs job/digest)" = 'uid=1200
+e8fc058b9d4faed7f6de5b0221c629785638c5318ac0be11b72dd3f11fe902b9  /work/input.txt' && echo ok'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.negatives]]
+name = '''Root image hidden behind a Pod UID override'''
+run = '''mkdir -p "$PODDOJO_LAB_DIR/m4-image"
+printf 'warehouse=west\n' > "$PODDOJO_LAB_DIR/m4-image/input.txt"
+cat > "$PODDOJO_LAB_DIR/m4-image/digest.sh" <<'EOF'
+#!/bin/sh
+set -eu
+printf 'uid=%s\n' "$(id -u)"
+sha256sum /work/input.txt
+EOF
+cat > "$PODDOJO_LAB_DIR/m4-image/Dockerfile" <<'EOF'
+FROM busybox:1.36
+WORKDIR /work
+COPY --chown=1200:1200 input.txt digest.sh ./
+RUN chmod 0555 /work/digest.sh && chmod 0444 /work/input.txt
+USER 0
+ENTRYPOINT ["/work/digest.sh"]
+EOF
+docker build -t dojo/mock4-digest:v1 "$PODDOJO_LAB_DIR/m4-image"
+kind load docker-image dojo/mock4-digest:v1 --name poddojo
+kubectl -n mock4-q01 apply -f - <<'EOF'
+apiVersion: batch/v1
+kind: Job
+metadata: {name: digest}
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: digest
+        image: dojo/mock4-digest:v1
+        imagePullPolicy: IfNotPresent
+        securityContext: {runAsUser: 1200, runAsNonRoot: true, readOnlyRootFilesystem: true}
+EOF
+kubectl -n mock4-q01 wait --for=condition=complete job/digest --timeout=120s
+kubectl -n mock4-q01 logs job/digest > "$PODDOJO_LAB_DIR/m4-digest.txt"'''
+undo = '''kubectl -n mock4-q01 delete job digest --ignore-not-found --wait=true
+docker image rm dojo/mock4-digest:v1 >/dev/null 2>&1 || true
+rm -rf "$PODDOJO_LAB_DIR/m4-image"
+rm -f "$PODDOJO_LAB_DIR/m4-digest.txt"'''
+
+[[tasks.alternatives]]
+name = '''Explicit UID and GID in the image'''
+run = '''mkdir -p "$PODDOJO_LAB_DIR/m4-image"
+printf 'warehouse=west\n' > "$PODDOJO_LAB_DIR/m4-image/input.txt"
+cat > "$PODDOJO_LAB_DIR/m4-image/digest.sh" <<'EOF'
+#!/bin/sh
+set -eu
+printf 'uid=%s\n' "$(id -u)"
+sha256sum /work/input.txt
+EOF
+cat > "$PODDOJO_LAB_DIR/m4-image/Dockerfile" <<'EOF'
+FROM busybox:1.36
+WORKDIR /work
+COPY --chown=1200:1200 input.txt digest.sh ./
+RUN chmod 0555 /work/digest.sh && chmod 0444 /work/input.txt
+USER 1200:1200
+ENTRYPOINT ["/work/digest.sh"]
+EOF
+docker build -t dojo/mock4-digest:v1 "$PODDOJO_LAB_DIR/m4-image"
+kind load docker-image dojo/mock4-digest:v1 --name poddojo
+kubectl -n mock4-q01 apply -f - <<'EOF'
+apiVersion: batch/v1
+kind: Job
+metadata: {name: digest}
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: digest
+        image: dojo/mock4-digest:v1
+        imagePullPolicy: IfNotPresent
+        securityContext: {runAsNonRoot: true, readOnlyRootFilesystem: true}
+EOF
+kubectl -n mock4-q01 wait --for=condition=complete job/digest --timeout=120s
+kubectl -n mock4-q01 logs job/digest > "$PODDOJO_LAB_DIR/m4-digest.txt"'''
+undo = '''kubectl -n mock4-q01 delete job digest --ignore-not-found --wait=true
+docker image rm dojo/mock4-digest:v1 >/dev/null 2>&1 || true
+rm -rf "$PODDOJO_LAB_DIR/m4-image"
+rm -f "$PODDOJO_LAB_DIR/m4-digest.txt"'''
+
+[[tasks]]
+id = "q02"
+domain = "design-build"
+weight = 7
+title = "Start a live identity publisher before the web process"
+namespace = "mock4-q02"
+task = '''Repair Deployment `directory` in `mock4-q02`. Its HTTP container serves an empty shared volume and cannot become ready. Keep the HTTP image, command, read-only mount and readiness probe. Add native sidecar `publish` (busybox:1.36), sharing volume `pages` with write access at `/www`. Every second it must write the actual Pod name plus a newline to `/www/identity`, obtaining the name through a downward API environment variable. The sidecar must continue running and use a startup exec probe that tests the identity file is nonempty before the HTTP container starts. Keep one replica. Requests to port 8080 `/identity` must return that replica's actual name.'''
+setup = [
+'''kubectl -n mock4-q02 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: directory}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: directory}}
+  template:
+    metadata: {labels: {app: directory}}
+    spec:
+      volumes: [{name: pages, emptyDir: {}}]
+      containers:
+      - name: http
+        image: busybox:1.36
+        command: [httpd, -f, -p, '8080', -h, /www]
+        volumeMounts: [{name: pages, mountPath: /www, readOnly: true}]
+        readinessProbe:
+          httpGet: {path: /identity, port: 8080}
+          periodSeconds: 2
+EOF'''
+]
+solution = '''```bash
+kubectl -n mock4-q02 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: directory}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: directory}}
+  template:
+    metadata: {labels: {app: directory}}
+    spec:
+      volumes: [{name: pages, emptyDir: {}}]
+      initContainers:
+      - name: publish
+        image: busybox:1.36
+        restartPolicy: Always
+        env:
+        - name: POD_NAME
+          valueFrom: {fieldRef: {fieldPath: metadata.name}}
+        command: [sh, -c, 'while true; do printf "%s\n" "$POD_NAME" > /www/identity; sleep 1; done']
+        volumeMounts: [{name: pages, mountPath: /www}]
+        startupProbe:
+          exec: {command: [test, -s, /www/identity]}
+          periodSeconds: 1
+          failureThreshold: 30
+      containers:
+      - name: http
+        image: busybox:1.36
+        command: [httpd, -f, -p, '8080', -h, /www]
+        volumeMounts: [{name: pages, mountPath: /www, readOnly: true}]
+        readinessProbe:
+          httpGet: {path: /identity, port: 8080}
+          periodSeconds: 2
+EOF
+kubectl -n mock4-q02 rollout status deployment/directory --timeout=120s
+```'''
+
+[[tasks.checks]]
+name = '''A running native sidecar gates startup on the shared file'''
+run = '''v=$(kubectl -n mock4-q02 get deploy directory -o jsonpath='{.spec.template.spec.initContainers[?(@.name=="publish")].restartPolicy}|{.spec.template.spec.containers[?(@.name=="http")].image}|{.spec.template.spec.containers[?(@.name=="http")].command}|{.spec.template.spec.containers[?(@.name=="http")].volumeMounts[0].readOnly}') || exit 1
+[ "$v" = 'Always|busybox:1.36|["httpd","-f","-p","8080","-h","/www"]|true' ] || exit 1
+probe=$(kubectl -n mock4-q02 get deploy directory -o jsonpath='{.spec.template.spec.initContainers[?(@.name=="publish")].startupProbe.exec.command}') || exit 1
+case "$probe" in '["test","-s","/www/identity"]'|'["sh","-c","test -s /www/identity"]') ;; *) exit 1;; esac
+name=$(kubectl -n mock4-q02 get deploy directory -o jsonpath='{.spec.template.spec.initContainers[?(@.name=="publish")].env[?(@.valueFrom.fieldRef.fieldPath=="metadata.name")].name}') || exit 1
+[ -n "$name" ] && echo ok'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''The ready replica serves its own name and keeps publishing'''
+run = '''for i in $(seq 1 30); do
+p=$(kubectl -n mock4-q02 get pods -l app=directory -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{"\n"}{end}' | head -n 1)
+[ -n "$p" ] && [ "$(kubectl -n mock4-q02 get pod "$p" -o jsonpath='{.status.initContainerStatuses[?(@.name=="publish")].started}')" = true ] && [ "$(kubectl -n mock4-q02 exec "$p" -c http -- wget -qO- -T 2 http://127.0.0.1:8080/identity 2>/dev/null)" = "$p" ] && echo ok && exit 0
+sleep 2; done; exit 1'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''HTTP readiness converges with one desired replica'''
+run = '''for i in $(seq 1 30); do v=$(kubectl -n mock4-q02 get deploy directory -o jsonpath='{.spec.replicas}|{.status.readyReplicas}|{.status.updatedReplicas}' 2>/dev/null) && [ "$v" = '1|1|1' ] && echo ok && exit 0; sleep 2; done; exit 1'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.negatives]]
+name = '''Ordinary init container writes once instead of a live sidecar'''
+run = '''kubectl -n mock4-q02 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: directory}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: directory}}
+  template:
+    metadata: {labels: {app: directory}}
+    spec:
+      volumes: [{name: pages, emptyDir: {}}]
+      initContainers:
+      - name: publish
+        image: busybox:1.36
+        env:
+        - name: POD_NAME
+          valueFrom: {fieldRef: {fieldPath: metadata.name}}
+        command: [sh, -c, 'printf "%s\n" "$POD_NAME" > /www/identity']
+        volumeMounts: [{name: pages, mountPath: /www}]
+      containers:
+      - name: http
+        image: busybox:1.36
+        command: [httpd, -f, -p, '8080', -h, /www]
+        volumeMounts: [{name: pages, mountPath: /www, readOnly: true}]
+        readinessProbe:
+          httpGet: {path: /identity, port: 8080}
+          periodSeconds: 2
+EOF'''
+undo = '''kubectl -n mock4-q02 delete deployment directory --ignore-not-found --wait=true
+kubectl -n mock4-q02 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: directory}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: directory}}
+  template:
+    metadata: {labels: {app: directory}}
+    spec:
+      volumes: [{name: pages, emptyDir: {}}]
+      containers:
+      - name: http
+        image: busybox:1.36
+        command: [httpd, -f, -p, '8080', -h, /www]
+        volumeMounts: [{name: pages, mountPath: /www, readOnly: true}]
+        readinessProbe:
+          httpGet: {path: /identity, port: 8080}
+          periodSeconds: 2
+EOF'''
+
+[[tasks.alternatives]]
+name = '''Echo instead of printf preserves the live file contract'''
+run = '''kubectl -n mock4-q02 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: directory}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: directory}}
+  template:
+    metadata: {labels: {app: directory}}
+    spec:
+      volumes: [{name: pages, emptyDir: {}}]
+      initContainers:
+      - name: publish
+        image: busybox:1.36
+        restartPolicy: Always
+        env:
+        - name: POD_NAME
+          valueFrom: {fieldRef: {fieldPath: metadata.name}}
+        command: [sh, -c, 'while true; do echo "$POD_NAME" > /www/identity; sleep 1; done']
+        volumeMounts: [{name: pages, mountPath: /www}]
+        startupProbe:
+          exec: {command: [test, -s, /www/identity]}
+          periodSeconds: 1
+          failureThreshold: 30
+      containers:
+      - name: http
+        image: busybox:1.36
+        command: [httpd, -f, -p, '8080', -h, /www]
+        volumeMounts: [{name: pages, mountPath: /www, readOnly: true}]
+        readinessProbe:
+          httpGet: {path: /identity, port: 8080}
+          periodSeconds: 2
+EOF
+kubectl -n mock4-q02 rollout status deployment/directory --timeout=120s'''
+undo = '''kubectl -n mock4-q02 delete deployment directory --ignore-not-found --wait=true
+kubectl -n mock4-q02 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: directory}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: directory}}
+  template:
+    metadata: {labels: {app: directory}}
+    spec:
+      volumes: [{name: pages, emptyDir: {}}]
+      containers:
+      - name: http
+        image: busybox:1.36
+        command: [httpd, -f, -p, '8080', -h, /www]
+        volumeMounts: [{name: pages, mountPath: /www, readOnly: true}]
+        readinessProbe:
+          httpGet: {path: /identity, port: 8080}
+          periodSeconds: 2
+EOF'''
+
+[[tasks.alternatives]]
+name = '''Shell-form startup test and a different downward API variable name'''
+run = '''kubectl -n mock4-q02 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: directory}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: directory}}
+  template:
+    metadata: {labels: {app: directory}}
+    spec:
+      volumes: [{name: pages, emptyDir: {}}]
+      initContainers:
+      - name: publish
+        image: busybox:1.36
+        restartPolicy: Always
+        env:
+        - name: POD_ID
+          valueFrom: {fieldRef: {fieldPath: metadata.name}}
+        command: [sh, -c, 'while true; do printf "%s\n" "$POD_ID" > /www/identity; sleep 1; done']
+        volumeMounts: [{name: pages, mountPath: /www}]
+        startupProbe:
+          exec: {command: [sh, -c, 'test -s /www/identity']}
+          periodSeconds: 1
+          failureThreshold: 30
+      containers:
+      - name: http
+        image: busybox:1.36
+        command: [httpd, -f, -p, '8080', -h, /www]
+        volumeMounts: [{name: pages, mountPath: /www, readOnly: true}]
+        readinessProbe:
+          httpGet: {path: /identity, port: 8080}
+          periodSeconds: 2
+EOF
+kubectl -n mock4-q02 rollout status deployment/directory --timeout=120s'''
+undo = '''kubectl -n mock4-q02 delete deployment directory --ignore-not-found --wait=true
+kubectl -n mock4-q02 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: directory}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: directory}}
+  template:
+    metadata: {labels: {app: directory}}
+    spec:
+      volumes: [{name: pages, emptyDir: {}}]
+      containers:
+      - name: http
+        image: busybox:1.36
+        command: [httpd, -f, -p, '8080', -h, /www]
+        volumeMounts: [{name: pages, mountPath: /www, readOnly: true}]
+        readinessProbe:
+          httpGet: {path: /identity, port: 8080}
+          periodSeconds: 2
+EOF'''
+
+[[tasks]]
+id = "q03"
+domain = "design-build"
+weight = 7
+title = "Repair the scheduled warehouse audit"
+namespace = "mock4-q03"
+task = '''CronJob `warehouse-audit` in `mock4-q03` is paused and its worker is misconfigured. Preserve the schedule `*/20 * * * *`, timeZone Etc/UTC, image and command. Set REGION=west, suspend=false, concurrencyPolicy Forbid, startingDeadlineSeconds 60, successfulJobsHistoryLimit 2 and failedJobsHistoryLimit 1. Keep Job backoffLimit 0 and Pod restartPolicy Never. Create manual Job `audit-proof` from the corrected CronJob, retain it after completion, and save its logs to `$PODDOJO_LAB_DIR/m4-audit.txt`. The controller may create another scheduled run; do not depend on waiting for the clock.'''
+setup = [
+'''kubectl -n mock4-q03 apply -f - <<'EOF'
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: warehouse-audit}
+spec:
+  schedule: '*/20 * * * *'
+  timeZone: Etc/UTC
+  suspend: true
+  concurrencyPolicy: Allow
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: audit
+            image: busybox:1.36
+            env: [{name: REGION, value: unset}]
+            command: [sh, -c, 'test "$REGION" = west && echo "audit region=$REGION"']
+EOF'''
+]
+solution = '''```bash
+kubectl -n mock4-q03 apply -f - <<'EOF'
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: warehouse-audit}
+spec:
+  schedule: '*/20 * * * *'
+  timeZone: Etc/UTC
+  suspend: false
+  startingDeadlineSeconds: 60
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: audit
+            image: busybox:1.36
+            env: [{name: REGION, value: west}]
+            command: [sh, -c, 'test "$REGION" = west && echo "audit region=$REGION"']
+EOF
+kubectl -n mock4-q03 create job audit-proof --from=cronjob/warehouse-audit
+kubectl -n mock4-q03 wait --for=condition=complete job/audit-proof --timeout=120s
+kubectl -n mock4-q03 logs job/audit-proof > "$PODDOJO_LAB_DIR/m4-audit.txt"
+```'''
+
+[[tasks.checks]]
+name = '''Schedule and controller safety settings are repaired'''
+run = '''kubectl -n mock4-q03 get cronjob warehouse-audit -o jsonpath='{.spec.schedule}|{.spec.timeZone}|{.spec.suspend}|{.spec.concurrencyPolicy}|{.spec.startingDeadlineSeconds}|{.spec.successfulJobsHistoryLimit}|{.spec.failedJobsHistoryLimit}|{.spec.jobTemplate.spec.backoffLimit}|{.spec.jobTemplate.spec.template.spec.restartPolicy}''''
+equals = '''*/20 * * * *|Etc/UTC|false|Forbid|60|2|1|0|Never'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''A real proof Job completes and its output is preserved'''
+run = '''kubectl -n mock4-q03 wait --for=condition=complete job/audit-proof --timeout=60s >/dev/null && [ "$(kubectl -n mock4-q03 logs job/audit-proof)" = 'audit region=west' ] && [ "$(cat "$PODDOJO_LAB_DIR/m4-audit.txt")" = 'audit region=west' ] && echo ok'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''The corrected CronJob template can produce the proof result'''
+run = '''kubectl -n mock4-q03 get cronjob warehouse-audit -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].env[?(@.name=="REGION")].value}|{.spec.jobTemplate.spec.template.spec.containers[0].image}|{.spec.jobTemplate.spec.template.spec.containers[0].command[2]}''''
+equals = '''west|busybox:1.36|test "$REGION" = west && echo "audit region=$REGION"'''
+timeout = 90
+
+[[tasks.negatives]]
+name = '''Manual Job fixed but the scheduled template still has the wrong region'''
+run = '''kubectl -n mock4-q03 apply -f - <<'EOF'
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: warehouse-audit}
+spec:
+  schedule: '*/20 * * * *'
+  timeZone: Etc/UTC
+  suspend: false
+  startingDeadlineSeconds: 60
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: audit
+            image: busybox:1.36
+            env: [{name: REGION, value: west}]
+            command: [sh, -c, 'test "$REGION" = west && echo "audit region=$REGION"']
+EOF
+kubectl -n mock4-q03 create job audit-proof --from=cronjob/warehouse-audit
+kubectl -n mock4-q03 wait --for=condition=complete job/audit-proof --timeout=120s
+kubectl -n mock4-q03 logs job/audit-proof > "$PODDOJO_LAB_DIR/m4-audit.txt"
+kubectl -n mock4-q03 apply -f - <<'EOF'
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: warehouse-audit}
+spec:
+  schedule: '*/20 * * * *'
+  timeZone: Etc/UTC
+  suspend: false
+  startingDeadlineSeconds: 60
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: audit
+            image: busybox:1.36
+            env: [{name: REGION, value: unset}]
+            command: [sh, -c, 'test "$REGION" = west && echo "audit region=$REGION"']
+EOF'''
+undo = '''kubectl -n mock4-q03 delete cronjob warehouse-audit --ignore-not-found --wait=true
+kubectl -n mock4-q03 delete job audit-proof --ignore-not-found --wait=true
+rm -f "$PODDOJO_LAB_DIR/m4-audit.txt"
+kubectl -n mock4-q03 apply -f - <<'EOF'
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: warehouse-audit}
+spec:
+  schedule: '*/20 * * * *'
+  timeZone: Etc/UTC
+  suspend: true
+  concurrencyPolicy: Allow
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: audit
+            image: busybox:1.36
+            env: [{name: REGION, value: unset}]
+            command: [sh, -c, 'test "$REGION" = west && echo "audit region=$REGION"']
+EOF'''
+
+[[tasks.alternatives]]
+name = '''Imperative controller patch followed by the same proof run'''
+run = '''kubectl -n mock4-q03 patch cronjob warehouse-audit --type=merge -p '{"spec":{"suspend":false,"concurrencyPolicy":"Forbid","startingDeadlineSeconds":60,"successfulJobsHistoryLimit":2,"failedJobsHistoryLimit":1,"jobTemplate":{"spec":{"template":{"spec":{"containers":[{"name":"audit","image":"busybox:1.36","env":[{"name":"REGION","value":"west"}],"command":["sh","-c","test \"$REGION\" = west && echo \"audit region=$REGION\""]}]}}}}}}'
+kubectl -n mock4-q03 create job audit-proof --from=cronjob/warehouse-audit
+kubectl -n mock4-q03 wait --for=condition=complete job/audit-proof --timeout=120s
+kubectl -n mock4-q03 logs job/audit-proof > "$PODDOJO_LAB_DIR/m4-audit.txt"'''
+undo = '''kubectl -n mock4-q03 delete cronjob warehouse-audit --ignore-not-found --wait=true
+kubectl -n mock4-q03 delete job audit-proof --ignore-not-found --wait=true
+rm -f "$PODDOJO_LAB_DIR/m4-audit.txt"
+kubectl -n mock4-q03 apply -f - <<'EOF'
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: warehouse-audit}
+spec:
+  schedule: '*/20 * * * *'
+  timeZone: Etc/UTC
+  suspend: true
+  concurrencyPolicy: Allow
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: audit
+            image: busybox:1.36
+            env: [{name: REGION, value: unset}]
+            command: [sh, -c, 'test "$REGION" = west && echo "audit region=$REGION"']
+EOF'''
+
+[[tasks]]
+id = "q04"
+domain = "deployment"
+weight = 7
+title = "Recover a rollout broken by process arguments"
+namespace = "mock4-q04"
+task = '''Deployment `invoice` in `mock4-q04` has a failing revision even though the image was not changed. Diagnose the rejected-43 Pod and save its real error logs to `$PODDOJO_LAB_DIR/m4-invoice-failure.txt` before it disappears. Restore the previously accepted full Pod template (release annotation accepted-42), preserving the Deployment UID, history, two replicas and zero-unavailable rolling strategy. Do not recreate the Deployment or merely change its image. Wait for recovery and save rollout history to `$PODDOJO_LAB_DIR/m4-invoice-history.txt`. Each restored replica must serve `accepted-42` on port 8080.'''
+setup = [
+'''kubectl -n mock4-q04 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: invoice}
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy: {type: RollingUpdate, rollingUpdate: {maxSurge: 1, maxUnavailable: 0}}
+  selector: {matchLabels: {app: invoice}}
+  template:
+    metadata:
+      labels: {app: invoice}
+      annotations: {release: accepted-42}
+    spec:
+      containers:
+      - name: http
+        image: busybox:1.36
+        command: [sh, -c, 'mkdir -p /www; echo accepted-42 > /www/index.html; exec httpd -f -p 8080 -h /www']
+        readinessProbe: {httpGet: {path: /, port: 8080}, periodSeconds: 2}
+EOF
+kubectl -n mock4-q04 rollout status deployment/invoice --timeout=120s
+kubectl -n mock4-q04 get deploy invoice -o jsonpath='{.metadata.uid}' > "$PODDOJO_LAB_DIR/m4-invoice-uid.txt"
+kubectl -n mock4-q04 patch deploy invoice --type=strategic -p '{"spec":{"template":{"metadata":{"annotations":{"release":"rejected-43"}},"spec":{"containers":[{"name":"http","command":["sh","-c","echo invalid-option: --ledger-mode >&2; exit 64"]}]}}}}'
+for i in $(seq 1 60); do
+p=$(kubectl -n mock4-q04 get pods -l app=invoice -o jsonpath='{range .items[?(@.metadata.annotations.release=="rejected-43")]}{.metadata.name}{"\n"}{end}' | head -n 1)
+[ -n "$p" ] && kubectl -n mock4-q04 logs "$p" 2>/dev/null | grep -q 'invalid-option: --ledger-mode' && break
+sleep 2; done
+[ -n "$p" ] && kubectl -n mock4-q04 logs "$p" 2>/dev/null | grep -q 'invalid-option: --ledger-mode'
+'''
+]
+solution = '''```bash
+kubectl -n mock4-q04 rollout history deployment/invoice
+p=$(kubectl -n mock4-q04 get pods -l app=invoice -o jsonpath='{range .items[?(@.metadata.annotations.release=="rejected-43")]}{.metadata.name}{"\n"}{end}' | head -n 1)
+kubectl -n mock4-q04 logs "$p" > "$PODDOJO_LAB_DIR/m4-invoice-failure.txt" 2>&1
+kubectl -n mock4-q04 rollout undo deployment/invoice
+kubectl -n mock4-q04 rollout status deployment/invoice --timeout=120s
+kubectl -n mock4-q04 rollout history deployment/invoice > "$PODDOJO_LAB_DIR/m4-invoice-history.txt"
+```'''
+
+[[tasks.checks]]
+name = '''Actual failed-revision logs and recovery history are saved'''
+run = '''grep -Fx 'invalid-option: --ledger-mode' "$PODDOJO_LAB_DIR/m4-invoice-failure.txt" >/dev/null && grep 'invoice' "$PODDOJO_LAB_DIR/m4-invoice-history.txt" >/dev/null && test "$(kubectl -n mock4-q04 get deploy invoice -o jsonpath='{.spec.template.metadata.annotations.release}')" = accepted-42 && echo ok'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''Original Deployment identity and restored revision survive'''
+run = '''test "$(kubectl -n mock4-q04 get deploy invoice -o jsonpath='{.metadata.uid}')" = "$(cat "$PODDOJO_LAB_DIR/m4-invoice-uid.txt")" && test "$(kubectl -n mock4-q04 get deploy invoice -o jsonpath='{.spec.template.metadata.annotations.release}')" = accepted-42 && test "$(kubectl -n mock4-q04 get rs -l app=invoice -o name | wc -l | tr -d ' ')" -ge 2 && echo ok
+test "$(kubectl -n mock4-q04 get deploy invoice -o jsonpath='{.spec.strategy.type}|{.spec.strategy.rollingUpdate.maxSurge}|{.spec.strategy.rollingUpdate.maxUnavailable}')" = 'RollingUpdate|1|0' '''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''Both restored replicas serve accepted-42, with no rejected replica left'''
+run = '''for i in $(seq 1 30); do
+v=$(kubectl -n mock4-q04 get deploy invoice -o jsonpath='{.spec.replicas}|{.status.updatedReplicas}|{.status.readyReplicas}|{.status.replicas}')
+[ "$v" = '2|2|2|2' ] && [ "$(kubectl -n mock4-q04 get pods -l app=invoice -o jsonpath='{range .items[*]}{.metadata.annotations.release}{"\n"}{end}' | sort -u)" = accepted-42 ] && [ "$(kubectl -n mock4-q04 exec deploy/invoice -- wget -qO- -T 2 http://127.0.0.1:8080/ 2>/dev/null)" = accepted-42 ] && echo ok && exit 0
+sleep 2; done; exit 1'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.negatives]]
+name = '''A new Deployment serves the right page but destroys identity and history'''
+run = '''kubectl -n mock4-q04 rollout history deployment/invoice
+p=$(kubectl -n mock4-q04 get pods -l app=invoice -o jsonpath='{range .items[?(@.metadata.annotations.release=="rejected-43")]}{.metadata.name}{"\n"}{end}' | head -n 1)
+kubectl -n mock4-q04 logs "$p" > "$PODDOJO_LAB_DIR/m4-invoice-failure.txt" 2>&1
+kubectl -n mock4-q04 rollout undo deployment/invoice
+kubectl -n mock4-q04 rollout status deployment/invoice --timeout=120s
+kubectl -n mock4-q04 rollout history deployment/invoice > "$PODDOJO_LAB_DIR/m4-invoice-history.txt"
+kubectl -n mock4-q04 delete deploy invoice --wait=true
+kubectl -n mock4-q04 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: invoice}
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy: {type: RollingUpdate, rollingUpdate: {maxSurge: 1, maxUnavailable: 0}}
+  selector: {matchLabels: {app: invoice}}
+  template:
+    metadata:
+      labels: {app: invoice}
+      annotations: {release: accepted-42}
+    spec:
+      containers:
+      - name: http
+        image: busybox:1.36
+        command: [sh, -c, 'mkdir -p /www; echo accepted-42 > /www/index.html; exec httpd -f -p 8080 -h /www']
+        readinessProbe: {httpGet: {path: /, port: 8080}, periodSeconds: 2}
+EOF
+kubectl -n mock4-q04 rollout status deployment/invoice --timeout=120s'''
+undo = '''kubectl -n mock4-q04 delete deploy invoice --ignore-not-found --wait=true
+rm -f "$PODDOJO_LAB_DIR/m4-invoice-failure.txt" "$PODDOJO_LAB_DIR/m4-invoice-history.txt"
+kubectl -n mock4-q04 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: invoice}
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy: {type: RollingUpdate, rollingUpdate: {maxSurge: 1, maxUnavailable: 0}}
+  selector: {matchLabels: {app: invoice}}
+  template:
+    metadata:
+      labels: {app: invoice}
+      annotations: {release: accepted-42}
+    spec:
+      containers:
+      - name: http
+        image: busybox:1.36
+        command: [sh, -c, 'mkdir -p /www; echo accepted-42 > /www/index.html; exec httpd -f -p 8080 -h /www']
+        readinessProbe: {httpGet: {path: /, port: 8080}, periodSeconds: 2}
+EOF
+kubectl -n mock4-q04 rollout status deployment/invoice --timeout=120s
+kubectl -n mock4-q04 get deploy invoice -o jsonpath='{.metadata.uid}' > "$PODDOJO_LAB_DIR/m4-invoice-uid.txt"
+kubectl -n mock4-q04 patch deploy invoice --type=strategic -p '{"spec":{"template":{"metadata":{"annotations":{"release":"rejected-43"}},"spec":{"containers":[{"name":"http","command":["sh","-c","echo invalid-option: --ledger-mode >&2; exit 64"]}]}}}}'
+for i in $(seq 1 60); do
+p=$(kubectl -n mock4-q04 get pods -l app=invoice -o jsonpath='{range .items[?(@.metadata.annotations.release=="rejected-43")]}{.metadata.name}{"\n"}{end}' | head -n 1)
+[ -n "$p" ] && kubectl -n mock4-q04 logs "$p" 2>/dev/null | grep -q 'invalid-option: --ledger-mode' && break
+sleep 2; done
+[ -n "$p" ] && kubectl -n mock4-q04 logs "$p" 2>/dev/null | grep -q 'invalid-option: --ledger-mode'
+'''
+
+[[tasks.alternatives]]
+name = '''Explicit rollback revision instead of the implicit previous revision'''
+run = '''kubectl -n mock4-q04 rollout history deployment/invoice
+p=$(kubectl -n mock4-q04 get pods -l app=invoice -o jsonpath='{range .items[?(@.metadata.annotations.release=="rejected-43")]}{.metadata.name}{"\n"}{end}' | head -n 1)
+kubectl -n mock4-q04 logs "$p" > "$PODDOJO_LAB_DIR/m4-invoice-failure.txt" 2>&1
+kubectl -n mock4-q04 rollout undo deployment/invoice --to-revision=1
+kubectl -n mock4-q04 rollout status deployment/invoice --timeout=120s
+kubectl -n mock4-q04 rollout history deployment/invoice > "$PODDOJO_LAB_DIR/m4-invoice-history.txt"'''
+undo = '''kubectl -n mock4-q04 delete deploy invoice --ignore-not-found --wait=true
+rm -f "$PODDOJO_LAB_DIR/m4-invoice-failure.txt" "$PODDOJO_LAB_DIR/m4-invoice-history.txt"
+kubectl -n mock4-q04 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: invoice}
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy: {type: RollingUpdate, rollingUpdate: {maxSurge: 1, maxUnavailable: 0}}
+  selector: {matchLabels: {app: invoice}}
+  template:
+    metadata:
+      labels: {app: invoice}
+      annotations: {release: accepted-42}
+    spec:
+      containers:
+      - name: http
+        image: busybox:1.36
+        command: [sh, -c, 'mkdir -p /www; echo accepted-42 > /www/index.html; exec httpd -f -p 8080 -h /www']
+        readinessProbe: {httpGet: {path: /, port: 8080}, periodSeconds: 2}
+EOF
+kubectl -n mock4-q04 rollout status deployment/invoice --timeout=120s
+kubectl -n mock4-q04 get deploy invoice -o jsonpath='{.metadata.uid}' > "$PODDOJO_LAB_DIR/m4-invoice-uid.txt"
+kubectl -n mock4-q04 patch deploy invoice --type=strategic -p '{"spec":{"template":{"metadata":{"annotations":{"release":"rejected-43"}},"spec":{"containers":[{"name":"http","command":["sh","-c","echo invalid-option: --ledger-mode >&2; exit 64"]}]}}}}'
+for i in $(seq 1 60); do
+p=$(kubectl -n mock4-q04 get pods -l app=invoice -o jsonpath='{range .items[?(@.metadata.annotations.release=="rejected-43")]}{.metadata.name}{"\n"}{end}' | head -n 1)
+[ -n "$p" ] && kubectl -n mock4-q04 logs "$p" 2>/dev/null | grep -q 'invalid-option: --ledger-mode' && break
+sleep 2; done
+[ -n "$p" ] && kubectl -n mock4-q04 logs "$p" 2>/dev/null | grep -q 'invalid-option: --ledger-mode'
+'''
+
+[[tasks]]
+id = "q05"
+domain = "deployment"
+weight = 6
+title = "Upgrade the release display through Helm values"
+namespace = "mock4-q05"
+task = '''Existing Helm release `display` in `mock4-q05` uses the provided local chart `$PODDOJO_LAB_DIR/m4-chart`. Upgrade it in place, using values replicaCount=2, message=exam-ready-v4 and cpuRequest=40m; keep the image, Service port, resource names and chart templates. Put these overrides in `$PODDOJO_LAB_DIR/m4-display-values.yaml`, pass that file to Helm, and export the release's user-supplied values to `$PODDOJO_LAB_DIR/m4-display-export.yaml`. Both replicas must serve the new message through Service `release-display:80`. Preserve Helm ownership and release history; no repository access is needed.'''
+setup = [
+'''mkdir -p "$PODDOJO_LAB_DIR/m4-chart/templates"
+cat > "$PODDOJO_LAB_DIR/m4-chart/Chart.yaml" <<'EOF'
+apiVersion: v2
+name: dojo-exam-display
+version: 0.1.0
+EOF
+cat > "$PODDOJO_LAB_DIR/m4-chart/values.yaml" <<'EOF'
+replicaCount: 1
+message: staging-unapproved
+cpuRequest: 20m
+EOF
+cat > "$PODDOJO_LAB_DIR/m4-chart/templates/app.yaml" <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: release-display}
+data:
+  index.html: {{ .Values.message | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: release-display}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector: {matchLabels: {app: release-display}}
+  template:
+    metadata:
+      labels: {app: release-display}
+      annotations:
+        content-revision: {{ .Values.message | quote }}
+    spec:
+      volumes:
+      - name: page
+        configMap: {name: release-display}
+      containers:
+      - name: http
+        image: busybox:1.36
+        command: [httpd, -f, -p, '8080', -h, /www]
+        resources:
+          requests: {cpu: {{ .Values.cpuRequest | quote }}, memory: 8Mi}
+        volumeMounts: [{name: page, mountPath: /www, readOnly: true}]
+        readinessProbe: {httpGet: {path: /, port: 8080}, periodSeconds: 2}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: release-display}
+spec:
+  selector: {app: release-display}
+  ports: [{name: http, port: 80, targetPort: 8080}]
+EOF
+helm upgrade --install display "$PODDOJO_LAB_DIR/m4-chart" -n mock4-q05 --wait --timeout=180s
+
+cksum "$PODDOJO_LAB_DIR/m4-chart/Chart.yaml" "$PODDOJO_LAB_DIR/m4-chart/values.yaml" "$PODDOJO_LAB_DIR/m4-chart/templates/app.yaml" > "$PODDOJO_LAB_DIR/m4-chart-checksum.txt"'''
+]
+solution = '''```bash
+cat > "$PODDOJO_LAB_DIR/m4-display-values.yaml" <<'EOF'
+replicaCount: 2
+message: exam-ready-v4
+cpuRequest: 40m
+EOF
+helm upgrade display "$PODDOJO_LAB_DIR/m4-chart" -n mock4-q05 --reuse-values -f "$PODDOJO_LAB_DIR/m4-display-values.yaml" --wait --timeout=180s
+helm get values display -n mock4-q05 -o yaml > "$PODDOJO_LAB_DIR/m4-display-export.yaml"
+```'''
+
+[[tasks.checks]]
+name = '''Helm records the override file values in the release'''
+run = '''v=$(helm get values display -n mock4-q05 -o json) || exit 1
+printf '%s' "$v" | grep -Eq '"message"[[:space:]]*:[[:space:]]*"exam-ready-v4"' && printf '%s' "$v" | grep -Eq '"replicaCount"[[:space:]]*:[[:space:]]*2' && printf '%s' "$v" | grep -Eq '"cpuRequest"[[:space:]]*:[[:space:]]*"40m"' && helm history display -n mock4-q05 -o json | grep -Eq '"revision"[[:space:]]*:[[:space:]]*([2-9]|[1-9][0-9]+)' && echo ok'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''Two Helm-owned replicas have the new configuration'''
+run = '''for i in $(seq 1 30); do v=$(kubectl -n mock4-q05 get deploy release-display -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}|{.spec.replicas}|{.status.readyReplicas}|{.spec.template.metadata.annotations.content-revision}|{.spec.template.spec.containers[0].resources.requests.cpu}'  2>/dev/null) && [ "$v" = 'display|2|2|exam-ready-v4|40m' ] && echo ok && exit 0; sleep 2; done; exit 1'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''New configuration is served through the Service'''
+run = '''for i in $(seq 1 30); do v=$(kubectl -n mock4-q05 exec deploy/release-display -- wget -qO- -T 2 http://release-display/ 2>/dev/null) && [ "$v" = 'exam-ready-v4' ] && echo ok && exit 0; sleep 2; done; exit 1'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''Values files render and describe the upgraded release'''
+run = '''test "$(cksum "$PODDOJO_LAB_DIR/m4-chart/Chart.yaml" "$PODDOJO_LAB_DIR/m4-chart/values.yaml" "$PODDOJO_LAB_DIR/m4-chart/templates/app.yaml")" = "$(cat "$PODDOJO_LAB_DIR/m4-chart-checksum.txt")" || exit 1
+r=$(helm template display "$PODDOJO_LAB_DIR/m4-chart" -n mock4-q05 -f "$PODDOJO_LAB_DIR/m4-display-values.yaml") || exit 1
+printf '%s\n' "$r" | grep -Eq 'replicas: *2' && printf '%s\n' "$r" | grep -q 'exam-ready-v4' && printf '%s\n' "$r" | grep -Eq 'cpu: *"?40m"?' || exit 1
+test "$(helm get values display -n mock4-q05 -o yaml)" = "$(cat "$PODDOJO_LAB_DIR/m4-display-export.yaml")" && echo ok'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.negatives]]
+name = '''Direct object patches leave Helm values describing the old release'''
+run = '''kubectl -n mock4-q05 scale deployment release-display --replicas=2
+kubectl -n mock4-q05 patch configmap release-display --type=merge -p '{"data":{"index.html":"exam-ready-v4"}}'
+kubectl -n mock4-q05 set resources deployment/release-display --requests=cpu=40m,memory=8Mi
+kubectl -n mock4-q05 rollout status deployment/release-display --timeout=120s'''
+undo = '''helm upgrade display "$PODDOJO_LAB_DIR/m4-chart" -n mock4-q05 --reset-values --wait --timeout=180s
+rm -f "$PODDOJO_LAB_DIR/m4-display-values.yaml" "$PODDOJO_LAB_DIR/m4-display-export.yaml"'''
+
+[[tasks.alternatives]]
+name = '''A reset-values upgrade with a complete override file is equivalent'''
+run = '''cat > "$PODDOJO_LAB_DIR/m4-display-values.yaml" <<'EOF'
+replicaCount: 2
+message: exam-ready-v4
+cpuRequest: 40m
+EOF
+helm upgrade display "$PODDOJO_LAB_DIR/m4-chart" -n mock4-q05 --reset-values -f "$PODDOJO_LAB_DIR/m4-display-values.yaml" --wait --timeout=180s
+helm get values display -n mock4-q05 -o yaml > "$PODDOJO_LAB_DIR/m4-display-export.yaml"'''
+undo = '''helm upgrade display "$PODDOJO_LAB_DIR/m4-chart" -n mock4-q05 --reset-values --wait --timeout=180s
+rm -f "$PODDOJO_LAB_DIR/m4-display-values.yaml" "$PODDOJO_LAB_DIR/m4-display-export.yaml"'''
+
+[[tasks]]
+id = "q06"
+domain = "deployment"
+weight = 7
+title = "Deliver pricing configuration with an overlay"
+namespace = "mock4-q06"
+task = '''Use the supplied base `$PODDOJO_LAB_DIR/m4-kustomize/base` without editing it. Create `overlays/exam` targeting namespace `mock4-q06`, namePrefix `exam-`, two pricing replicas, and Pod label stage=exam without extending the existing app=pricing selector. Generate ConfigMap `rates` with file key `rate` containing EUR-42, retaining its content hash suffix and automatic volume reference rewriting. Patch the HTTP container requests to 30m CPU and 16Mi memory in the overlay. Render to `$PODDOJO_LAB_DIR/m4-pricing-rendered.yaml` and apply it. Service `exam-pricing` must serve EUR-42. Keep the base reusable.'''
+setup = [
+'''mkdir -p "$PODDOJO_LAB_DIR/m4-kustomize/base"
+cat > "$PODDOJO_LAB_DIR/m4-kustomize/base/kustomization.yaml" <<'EOF'
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: [app.yaml]
+EOF
+cat > "$PODDOJO_LAB_DIR/m4-kustomize/base/app.yaml" <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: pricing}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: pricing}}
+  template:
+    metadata: {labels: {app: pricing}}
+    spec:
+      volumes:
+      - name: rates
+        configMap: {name: rates}
+      containers:
+      - name: http
+        image: busybox:1.36
+        command: [httpd, -f, -p, '8080', -h, /www]
+        volumeMounts: [{name: rates, mountPath: /www, readOnly: true}]
+        readinessProbe: {httpGet: {path: /rate, port: 8080}, periodSeconds: 2}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: pricing}
+spec:
+  selector: {app: pricing}
+  ports: [{port: 80, targetPort: 8080}]
+EOF
+cksum "$PODDOJO_LAB_DIR/m4-kustomize/base/app.yaml" "$PODDOJO_LAB_DIR/m4-kustomize/base/kustomization.yaml" > "$PODDOJO_LAB_DIR/m4-base-checksum.txt"'''
+]
+solution = '''```bash
+mkdir -p "$PODDOJO_LAB_DIR/m4-kustomize/overlays/exam"
+cat > "$PODDOJO_LAB_DIR/m4-kustomize/overlays/exam/kustomization.yaml" <<'EOF'
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: [../../base]
+namespace: mock4-q06
+namePrefix: exam-
+replicas:
+- {name: pricing, count: 2}
+configMapGenerator:
+- name: rates
+  literals: [rate=EUR-42]
+labels:
+- pairs: {stage: exam}
+  includeTemplates: true
+  includeSelectors: false
+patches:
+- target: {kind: Deployment, name: pricing}
+  patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/resources
+      value:
+        requests: {cpu: 30m, memory: 16Mi}
+EOF
+kubectl kustomize "$PODDOJO_LAB_DIR/m4-kustomize/overlays/exam" > "$PODDOJO_LAB_DIR/m4-pricing-rendered.yaml"
+kubectl apply -f "$PODDOJO_LAB_DIR/m4-pricing-rendered.yaml"
+kubectl -n mock4-q06 rollout status deployment/exam-pricing --timeout=120s
+```'''
+
+[[tasks.checks]]
+name = '''Rendered output is reproducible while the base stays untouched'''
+run = '''test -s "$PODDOJO_LAB_DIR/m4-pricing-rendered.yaml" && test "$(cksum "$PODDOJO_LAB_DIR/m4-kustomize/base/app.yaml" "$PODDOJO_LAB_DIR/m4-kustomize/base/kustomization.yaml")" = "$(cat "$PODDOJO_LAB_DIR/m4-base-checksum.txt")" && test "$(kubectl kustomize "$PODDOJO_LAB_DIR/m4-kustomize/overlays/exam")" = "$(cat "$PODDOJO_LAB_DIR/m4-pricing-rendered.yaml")" && echo ok'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''Overlay changes Pod labels and resources without changing the selector'''
+run = '''for i in $(seq 1 30); do v=$(kubectl -n mock4-q06 get deploy exam-pricing -o jsonpath='{.spec.replicas}|{.status.readyReplicas}|{.spec.selector.matchLabels}|{.spec.template.metadata.labels.stage}|{.spec.template.spec.containers[0].resources.requests.cpu}|{.spec.template.spec.containers[0].resources.requests.memory}' 2>/dev/null) && [ "$v" = '2|2|{"app":"pricing"}|exam|30m|16Mi' ] && echo ok && exit 0; sleep 2; done; exit 1'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''A hashed ConfigMap is referenced and its rate is served'''
+run = '''c=$(kubectl -n mock4-q06 get deploy exam-pricing -o jsonpath='{.spec.template.spec.volumes[?(@.name=="rates")].configMap.name}') || exit 1
+case "$c" in exam-rates-??????????) ;; *) exit 1;; esac
+[ "$(kubectl -n mock4-q06 get configmap "$c" -o jsonpath='{.data.rate}')" = EUR-42 ] || exit 1
+for i in $(seq 1 30); do [ "$(kubectl -n mock4-q06 exec deploy/exam-pricing -- wget -qO- -T 2 http://exam-pricing/rate 2>/dev/null)" = EUR-42 ] && echo ok && exit 0; sleep 2; done; exit 1'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.negatives]]
+name = '''Disabling the hash serves the right rate but loses versioned configuration'''
+run = '''mkdir -p "$PODDOJO_LAB_DIR/m4-kustomize/overlays/exam"
+cat > "$PODDOJO_LAB_DIR/m4-kustomize/overlays/exam/kustomization.yaml" <<'EOF'
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: [../../base]
+namespace: mock4-q06
+namePrefix: exam-
+replicas:
+- {name: pricing, count: 2}
+generatorOptions: {disableNameSuffixHash: true}
+configMapGenerator:
+- name: rates
+  literals: [rate=EUR-42]
+labels:
+- pairs: {stage: exam}
+  includeTemplates: true
+  includeSelectors: false
+patches:
+- target: {kind: Deployment, name: pricing}
+  patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/resources
+      value:
+        requests: {cpu: 30m, memory: 16Mi}
+EOF
+kubectl kustomize "$PODDOJO_LAB_DIR/m4-kustomize/overlays/exam" > "$PODDOJO_LAB_DIR/m4-pricing-rendered.yaml"
+kubectl apply -f "$PODDOJO_LAB_DIR/m4-pricing-rendered.yaml"
+kubectl -n mock4-q06 rollout status deployment/exam-pricing --timeout=120s'''
+undo = '''kubectl -n mock4-q06 delete deploy exam-pricing --ignore-not-found --wait=true
+kubectl -n mock4-q06 delete service exam-pricing --ignore-not-found
+kubectl -n mock4-q06 delete configmap -l stage=exam --ignore-not-found
+rm -rf "$PODDOJO_LAB_DIR/m4-kustomize/overlays"
+rm -f "$PODDOJO_LAB_DIR/m4-pricing-rendered.yaml"'''
+
+[[tasks.alternatives]]
+name = '''File-backed generation instead of a literal'''
+run = '''mkdir -p "$PODDOJO_LAB_DIR/m4-kustomize/overlays/exam"
+printf 'EUR-42' > "$PODDOJO_LAB_DIR/m4-kustomize/overlays/exam/rate.txt"
+cat > "$PODDOJO_LAB_DIR/m4-kustomize/overlays/exam/kustomization.yaml" <<'EOF'
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: [../../base]
+namespace: mock4-q06
+namePrefix: exam-
+replicas:
+- {name: pricing, count: 2}
+configMapGenerator:
+- name: rates
+  files: [rate=rate.txt]
+labels:
+- pairs: {stage: exam}
+  includeTemplates: true
+  includeSelectors: false
+patches:
+- target: {kind: Deployment, name: pricing}
+  patch: |-
+    - op: add
+      path: /spec/template/spec/containers/0/resources
+      value:
+        requests: {cpu: 30m, memory: 16Mi}
+EOF
+kubectl kustomize "$PODDOJO_LAB_DIR/m4-kustomize/overlays/exam" > "$PODDOJO_LAB_DIR/m4-pricing-rendered.yaml"
+kubectl apply -f "$PODDOJO_LAB_DIR/m4-pricing-rendered.yaml"
+kubectl -n mock4-q06 rollout status deployment/exam-pricing --timeout=120s'''
+undo = '''kubectl -n mock4-q06 delete deploy exam-pricing --ignore-not-found --wait=true
+kubectl -n mock4-q06 delete service exam-pricing --ignore-not-found
+kubectl -n mock4-q06 delete configmap -l stage=exam --ignore-not-found
+rm -rf "$PODDOJO_LAB_DIR/m4-kustomize/overlays"
+rm -f "$PODDOJO_LAB_DIR/m4-pricing-rendered.yaml"'''
+
+[[tasks]]
+id = "q07"
+domain = "observability"
+weight = 8
+title = "Replace misleading health checks on an intake service"
+namespace = "mock4-q07"
+task = '''Deployment `intake` in `mock4-q07` has a readiness connection error and a liveness check that always succeeds. Diagnose it without changing its ConfigMap, image, ports or mounts. Configure readiness HTTP `/ready` on the real 8081 listener every 2 seconds, liveness HTTP `/live` on that listener every 5 seconds, and startup TCP on that listener every 2 seconds with failureThreshold 30. You may use numeric or named probe ports. Keep one replica and wait for it to become ready. The root page is not the health contract: it returns 200 independently.'''
+setup = [
+'''kubectl -n mock4-q07 apply -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: intake-nginx}
+data:
+  default.conf: |
+    server {
+      listen 8081;
+      location = /ready { return 204; }
+      location = /live { return 200 "alive\n"; }
+      location / { return 200 "intake\n"; }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: intake}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: intake}}
+  template:
+    metadata: {labels: {app: intake}}
+    spec:
+      volumes:
+      - name: config
+        configMap: {name: intake-nginx}
+      containers:
+      - name: http
+        image: nginx:1.27-alpine
+        ports: [{name: health, containerPort: 8081}]
+        volumeMounts: [{name: config, mountPath: /etc/nginx/conf.d, readOnly: true}]
+        readinessProbe: {httpGet: {path: /ready, port: 8082}, periodSeconds: 2}
+        livenessProbe: {exec: {command: ['true']}, periodSeconds: 5}
+EOF
+{
+kubectl -n mock4-q07 get deploy intake -o jsonpath='{.spec.template.spec.containers[0].image}|{.spec.template.spec.containers[0].command}|{.spec.template.spec.containers[0].args}|{.spec.template.spec.containers[0].ports}|{.spec.template.spec.containers[0].volumeMounts}|{.spec.template.spec.volumes}'
+kubectl -n mock4-q07 get configmap intake-nginx -o jsonpath='{.data}'
+} > "$PODDOJO_LAB_DIR/m4-intake-contract.txt"'''
+]
+solution = '''```bash
+kubectl -n mock4-q07 apply -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: intake-nginx}
+data:
+  default.conf: |
+    server {
+      listen 8081;
+      location = /ready { return 204; }
+      location = /live { return 200 "alive\n"; }
+      location / { return 200 "intake\n"; }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: intake}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: intake}}
+  template:
+    metadata: {labels: {app: intake}}
+    spec:
+      volumes:
+      - name: config
+        configMap: {name: intake-nginx}
+      containers:
+      - name: http
+        image: nginx:1.27-alpine
+        ports: [{name: health, containerPort: 8081}]
+        volumeMounts: [{name: config, mountPath: /etc/nginx/conf.d, readOnly: true}]
+        readinessProbe: {httpGet: {path: /ready, port: health}, periodSeconds: 2}
+        livenessProbe: {httpGet: {path: /live, port: health}, periodSeconds: 5}
+        startupProbe: {tcpSocket: {port: health}, periodSeconds: 2, failureThreshold: 30}
+EOF
+kubectl -n mock4-q07 rollout status deployment/intake --timeout=120s
+```'''
+
+[[tasks.checks]]
+name = '''All probes target the actual listener with the required timing'''
+run = '''test "$(
+kubectl -n mock4-q07 get deploy intake -o jsonpath='{.spec.template.spec.containers[0].image}|{.spec.template.spec.containers[0].command}|{.spec.template.spec.containers[0].args}|{.spec.template.spec.containers[0].ports}|{.spec.template.spec.containers[0].volumeMounts}|{.spec.template.spec.volumes}'
+kubectl -n mock4-q07 get configmap intake-nginx -o jsonpath='{.data}'
+)" = "$(cat "$PODDOJO_LAB_DIR/m4-intake-contract.txt")" || exit 1
+v=$(kubectl -n mock4-q07 get deploy intake -o jsonpath='{.spec.template.spec.containers[0].readinessProbe.httpGet.path}|{.spec.template.spec.containers[0].readinessProbe.httpGet.port}|{.spec.template.spec.containers[0].readinessProbe.periodSeconds}|{.spec.template.spec.containers[0].livenessProbe.httpGet.path}|{.spec.template.spec.containers[0].livenessProbe.httpGet.port}|{.spec.template.spec.containers[0].livenessProbe.periodSeconds}|{.spec.template.spec.containers[0].startupProbe.tcpSocket.port}|{.spec.template.spec.containers[0].startupProbe.periodSeconds}|{.spec.template.spec.containers[0].startupProbe.failureThreshold}') || exit 1
+printf '%s\n' "$v" | grep -Eq '^/ready\|(health|8081)\|2\|/live\|(health|8081)\|5\|(health|8081)\|2\|30$' && echo ok'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''One updated replica serves real health responses'''
+run = '''for i in $(seq 1 30); do
+v=$(kubectl -n mock4-q07 get deploy intake -o jsonpath='{.spec.replicas}|{.status.readyReplicas}|{.status.updatedReplicas}|{.status.replicas}')
+[ "$v" = '1|1|1|1' ] && kubectl -n mock4-q07 exec deploy/intake -- wget -q -T 2 -O- http://127.0.0.1:8081/ready >/dev/null 2>&1 && [ "$(kubectl -n mock4-q07 exec deploy/intake -- wget -q -T 2 -O- http://127.0.0.1:8081/live 2>/dev/null)" = alive ] && echo ok && exit 0
+sleep 2; done; exit 1'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.negatives]]
+name = '''Root-page probes give readiness without testing health endpoints'''
+run = '''kubectl -n mock4-q07 apply -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: intake-nginx}
+data:
+  default.conf: |
+    server {
+      listen 8081;
+      location = /ready { return 204; }
+      location = /live { return 200 "alive\n"; }
+      location / { return 200 "intake\n"; }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: intake}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: intake}}
+  template:
+    metadata: {labels: {app: intake}}
+    spec:
+      volumes:
+      - name: config
+        configMap: {name: intake-nginx}
+      containers:
+      - name: http
+        image: nginx:1.27-alpine
+        ports: [{name: health, containerPort: 8081}]
+        volumeMounts: [{name: config, mountPath: /etc/nginx/conf.d, readOnly: true}]
+        readinessProbe: {httpGet: {path: /, port: health}, periodSeconds: 2}
+        livenessProbe: {httpGet: {path: /, port: health}, periodSeconds: 5}
+        startupProbe: {tcpSocket: {port: health}, periodSeconds: 2, failureThreshold: 30}
+EOF
+kubectl -n mock4-q07 rollout status deployment/intake --timeout=120s'''
+undo = '''kubectl -n mock4-q07 delete deploy intake --ignore-not-found --wait=true
+kubectl -n mock4-q07 apply -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: intake-nginx}
+data:
+  default.conf: |
+    server {
+      listen 8081;
+      location = /ready { return 204; }
+      location = /live { return 200 "alive\n"; }
+      location / { return 200 "intake\n"; }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: intake}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: intake}}
+  template:
+    metadata: {labels: {app: intake}}
+    spec:
+      volumes:
+      - name: config
+        configMap: {name: intake-nginx}
+      containers:
+      - name: http
+        image: nginx:1.27-alpine
+        ports: [{name: health, containerPort: 8081}]
+        volumeMounts: [{name: config, mountPath: /etc/nginx/conf.d, readOnly: true}]
+        readinessProbe: {httpGet: {path: /ready, port: 8082}, periodSeconds: 2}
+        livenessProbe: {exec: {command: ['true']}, periodSeconds: 5}
+EOF'''
+
+[[tasks.alternatives]]
+name = '''Numeric ports instead of the health port name'''
+run = '''kubectl -n mock4-q07 apply -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: intake-nginx}
+data:
+  default.conf: |
+    server {
+      listen 8081;
+      location = /ready { return 204; }
+      location = /live { return 200 "alive\n"; }
+      location / { return 200 "intake\n"; }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: intake}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: intake}}
+  template:
+    metadata: {labels: {app: intake}}
+    spec:
+      volumes:
+      - name: config
+        configMap: {name: intake-nginx}
+      containers:
+      - name: http
+        image: nginx:1.27-alpine
+        ports: [{name: health, containerPort: 8081}]
+        volumeMounts: [{name: config, mountPath: /etc/nginx/conf.d, readOnly: true}]
+        readinessProbe: {httpGet: {path: /ready, port: 8081}, periodSeconds: 2}
+        livenessProbe: {httpGet: {path: /live, port: 8081}, periodSeconds: 5}
+        startupProbe: {tcpSocket: {port: 8081}, periodSeconds: 2, failureThreshold: 30}
+EOF
+kubectl -n mock4-q07 rollout status deployment/intake --timeout=120s'''
+undo = '''kubectl -n mock4-q07 delete deploy intake --ignore-not-found --wait=true
+kubectl -n mock4-q07 apply -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: intake-nginx}
+data:
+  default.conf: |
+    server {
+      listen 8081;
+      location = /ready { return 204; }
+      location = /live { return 200 "alive\n"; }
+      location / { return 200 "intake\n"; }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: intake}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: intake}}
+  template:
+    metadata: {labels: {app: intake}}
+    spec:
+      volumes:
+      - name: config
+        configMap: {name: intake-nginx}
+      containers:
+      - name: http
+        image: nginx:1.27-alpine
+        ports: [{name: health, containerPort: 8081}]
+        volumeMounts: [{name: config, mountPath: /etc/nginx/conf.d, readOnly: true}]
+        readinessProbe: {httpGet: {path: /ready, port: 8082}, periodSeconds: 2}
+        livenessProbe: {exec: {command: ['true']}, periodSeconds: 5}
+EOF'''
+
+[[tasks]]
+id = "q08"
+domain = "observability"
+weight = 7
+title = "Diagnose unschedulable reconciliation workers"
+namespace = "mock4-q08"
+task = '''Two replicas of Deployment `reconciliation` in `mock4-q08` remain Pending. Save namespace FailedScheduling events (including their messages) to `$PODDOJO_LAB_DIR/m4-scheduling.txt`, then repair the Pod template to select existing Linux nodes using kubernetes.io/os=linux. Remove the impossible accelerator selector; do not label or edit nodes, recreate the Deployment, or change its worker image/command. Once two updated replicas are ready and old Pods have gone, save a name-sorted, headerless inventory to `$PODDOJO_LAB_DIR/m4-workers.txt`, with columns NAME, PHASE and NODE. Capture actual cluster output.'''
+setup = [
+'''kubectl -n mock4-q08 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: reconciliation}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: reconciliation}}
+  template:
+    metadata: {labels: {app: reconciliation}}
+    spec:
+      nodeSelector: {poddojo.invalid/accelerator: missing}
+      containers:
+      - name: worker
+        image: busybox:1.36
+        command: [sh, -c, 'echo reconciliation-online; sleep 14400']
+EOF
+kubectl -n mock4-q08 get deploy reconciliation -o jsonpath='{.metadata.uid}' > "$PODDOJO_LAB_DIR/m4-reconciliation-uid.txt"
+for i in $(seq 1 60); do
+kubectl -n mock4-q08 get events --field-selector reason=FailedScheduling -o jsonpath='{range .items[*]}{.involvedObject.name}{" "}{.reason}{" "}{.message}{"\n"}{end}' | grep -Eq '(node selector|affinity)' && break
+sleep 2; done
+kubectl -n mock4-q08 get events --field-selector reason=FailedScheduling -o jsonpath='{range .items[*]}{.involvedObject.name}{" "}{.reason}{" "}{.message}{"\n"}{end}' | grep -Eq '(node selector|affinity)'
+'''
+]
+solution = '''```bash
+kubectl -n mock4-q08 get events --field-selector reason=FailedScheduling -o wide > "$PODDOJO_LAB_DIR/m4-scheduling.txt"
+kubectl -n mock4-q08 patch deployment reconciliation --type=merge -p '{"spec":{"template":{"spec":{"nodeSelector":{"poddojo.invalid/accelerator":null,"kubernetes.io/os":"linux"}}}}}'
+kubectl -n mock4-q08 rollout status deployment/reconciliation --timeout=120s
+for i in $(seq 1 30); do
+v=$(kubectl -n mock4-q08 get pods -l app=reconciliation -o jsonpath='{range .items[*]}{.status.phase}{"\n"}{end}')
+[ "$v" = "$(printf 'Running\nRunning')" ] && break
+sleep 2; done
+[ "$v" = "$(printf 'Running\nRunning')" ]
+kubectl -n mock4-q08 get pods -l app=reconciliation --sort-by=.metadata.name -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,NODE:.spec.nodeName' --no-headers > "$PODDOJO_LAB_DIR/m4-workers.txt"
+```'''
+
+[[tasks.checks]]
+name = '''Scheduling evidence names this workload and its placement failure'''
+run = '''grep 'reconciliation-' "$PODDOJO_LAB_DIR/m4-scheduling.txt" | grep FailedScheduling | grep -Eq '(node selector|affinity)' && test "$(kubectl -n mock4-q08 get deploy reconciliation -o jsonpath='{.spec.template.spec.nodeSelector.kubernetes\.io/os}')" = linux && echo ok'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''The same Deployment now runs two updated workers'''
+run = '''test "$(kubectl -n mock4-q08 get deploy reconciliation -o jsonpath='{.metadata.uid}')" = "$(cat "$PODDOJO_LAB_DIR/m4-reconciliation-uid.txt")" || exit 1
+for i in $(seq 1 30); do
+v=$(kubectl -n mock4-q08 get deploy reconciliation -o jsonpath='{.spec.replicas}|{.status.updatedReplicas}|{.status.readyReplicas}|{.status.replicas}|{.spec.template.spec.nodeSelector.poddojo\.invalid/accelerator}')
+[ "$v" = '2|2|2|2|' ] && [ "$(kubectl -n mock4-q08 logs deploy/reconciliation 2>/dev/null)" = reconciliation-online ] && echo ok && exit 0
+sleep 2; done; exit 1'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''Submitted inventory matches two live running Pods'''
+run = '''test "$(wc -l < "$PODDOJO_LAB_DIR/m4-workers.txt" | tr -d ' ')" = 2 || exit 1
+test "$(kubectl -n mock4-q08 get pods -l app=reconciliation --sort-by=.metadata.name -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,NODE:.spec.nodeName' --no-headers)" = "$(cat "$PODDOJO_LAB_DIR/m4-workers.txt")" && test "$(grep -c Running "$PODDOJO_LAB_DIR/m4-workers.txt")" = 2 && echo ok'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.negatives]]
+name = '''Remove the impossible selector without adding Linux placement'''
+run = '''kubectl -n mock4-q08 get events --field-selector reason=FailedScheduling -o wide > "$PODDOJO_LAB_DIR/m4-scheduling.txt"
+kubectl -n mock4-q08 patch deployment reconciliation --type=merge -p '{"spec":{"template":{"spec":{"nodeSelector":{"poddojo.invalid/accelerator":null,"kubernetes.io/os":null}}}}}'
+kubectl -n mock4-q08 rollout status deployment/reconciliation --timeout=120s
+for i in $(seq 1 30); do
+v=$(kubectl -n mock4-q08 get pods -l app=reconciliation -o jsonpath='{range .items[*]}{.status.phase}{"\n"}{end}')
+[ "$v" = "$(printf 'Running\nRunning')" ] && break
+sleep 2; done
+[ "$v" = "$(printf 'Running\nRunning')" ]
+kubectl -n mock4-q08 get pods -l app=reconciliation --sort-by=.metadata.name -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,NODE:.spec.nodeName' --no-headers > "$PODDOJO_LAB_DIR/m4-workers.txt"'''
+undo = '''kubectl -n mock4-q08 delete deploy reconciliation --ignore-not-found --wait=true
+rm -f "$PODDOJO_LAB_DIR/m4-scheduling.txt" "$PODDOJO_LAB_DIR/m4-workers.txt"
+kubectl -n mock4-q08 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: reconciliation}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: reconciliation}}
+  template:
+    metadata: {labels: {app: reconciliation}}
+    spec:
+      nodeSelector: {poddojo.invalid/accelerator: missing}
+      containers:
+      - name: worker
+        image: busybox:1.36
+        command: [sh, -c, 'echo reconciliation-online; sleep 14400']
+EOF
+kubectl -n mock4-q08 get deploy reconciliation -o jsonpath='{.metadata.uid}' > "$PODDOJO_LAB_DIR/m4-reconciliation-uid.txt"
+for i in $(seq 1 60); do
+kubectl -n mock4-q08 get events --field-selector reason=FailedScheduling -o jsonpath='{range .items[*]}{.involvedObject.name}{" "}{.reason}{" "}{.message}{"\n"}{end}' | grep -Eq '(node selector|affinity)' && break
+sleep 2; done
+kubectl -n mock4-q08 get events --field-selector reason=FailedScheduling -o jsonpath='{range .items[*]}{.involvedObject.name}{" "}{.reason}{" "}{.message}{"\n"}{end}' | grep -Eq '(node selector|affinity)'
+'''
+
+[[tasks.alternatives]]
+name = '''Replace the nodeSelector map using JSON patch'''
+run = '''kubectl -n mock4-q08 get events --field-selector reason=FailedScheduling -o wide > "$PODDOJO_LAB_DIR/m4-scheduling.txt"
+kubectl -n mock4-q08 patch deployment reconciliation --type=json -p '[{"op":"replace","path":"/spec/template/spec/nodeSelector","value":{"kubernetes.io/os":"linux"}}]'
+kubectl -n mock4-q08 rollout status deployment/reconciliation --timeout=120s
+for i in $(seq 1 30); do
+v=$(kubectl -n mock4-q08 get pods -l app=reconciliation -o jsonpath='{range .items[*]}{.status.phase}{"\n"}{end}')
+[ "$v" = "$(printf 'Running\nRunning')" ] && break
+sleep 2; done
+[ "$v" = "$(printf 'Running\nRunning')" ]
+kubectl -n mock4-q08 get pods -l app=reconciliation --sort-by=.metadata.name -o custom-columns='NAME:.metadata.name,PHASE:.status.phase,NODE:.spec.nodeName' --no-headers > "$PODDOJO_LAB_DIR/m4-workers.txt"'''
+undo = '''kubectl -n mock4-q08 delete deploy reconciliation --ignore-not-found --wait=true
+rm -f "$PODDOJO_LAB_DIR/m4-scheduling.txt" "$PODDOJO_LAB_DIR/m4-workers.txt"
+kubectl -n mock4-q08 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: reconciliation}
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: reconciliation}}
+  template:
+    metadata: {labels: {app: reconciliation}}
+    spec:
+      nodeSelector: {poddojo.invalid/accelerator: missing}
+      containers:
+      - name: worker
+        image: busybox:1.36
+        command: [sh, -c, 'echo reconciliation-online; sleep 14400']
+EOF
+kubectl -n mock4-q08 get deploy reconciliation -o jsonpath='{.metadata.uid}' > "$PODDOJO_LAB_DIR/m4-reconciliation-uid.txt"
+for i in $(seq 1 60); do
+kubectl -n mock4-q08 get events --field-selector reason=FailedScheduling -o jsonpath='{range .items[*]}{.involvedObject.name}{" "}{.reason}{" "}{.message}{"\n"}{end}' | grep -Eq '(node selector|affinity)' && break
+sleep 2; done
+kubectl -n mock4-q08 get events --field-selector reason=FailedScheduling -o jsonpath='{range .items[*]}{.involvedObject.name}{" "}{.reason}{" "}{.message}{"\n"}{end}' | grep -Eq '(node selector|affinity)'
+'''
+
+[[tasks]]
+id = "q09"
+domain = "config-security"
+weight = 6
+title = "Supply one identity through environment and a file"
+namespace = "mock4-q09"
+task = '''The files `$PODDOJO_LAB_DIR/m4-identity.env` and `m4-client.conf` contain harmless practice identity data. In `mock4-q09`, create Opaque Secret `identity` with ACCOUNT from the env file and key client.conf from the configuration file. Create Pod `identity-client`, busybox:1.36, which prints ACCOUNT, prints `/run/identity/client.conf`, then sleeps 14400. Supply ACCOUNT from the Secret (explicit env reference or envFrom), and mount only client.conf at that path, read-only, from the Secret. Do not bake either value into the command, plain env values, a ConfigMap or an image. Keep the Pod running. The Secret type must be Opaque.'''
+setup = [
+'''printf 'ACCOUNT=training-client\n' > "$PODDOJO_LAB_DIR/m4-identity.env"
+printf 'identity=training-client\nmode=practice\n' > "$PODDOJO_LAB_DIR/m4-client.conf"'''
+]
+solution = '''```bash
+kubectl -n mock4-q09 create secret generic identity --from-literal=ACCOUNT="$(sed -n "s/^ACCOUNT=//p" "$PODDOJO_LAB_DIR/m4-identity.env")" --from-file=client.conf="$PODDOJO_LAB_DIR/m4-client.conf" --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n mock4-q09 apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: identity-client}
+spec:
+  containers:
+  - name: client
+    image: busybox:1.36
+    command: [sh, -c, 'printf "%s\n" "$ACCOUNT"; cat /run/identity/client.conf; sleep 14400']
+    env:
+    - name: ACCOUNT
+      valueFrom: {secretKeyRef: {name: identity, key: ACCOUNT}}
+    volumeMounts: [{name: identity, mountPath: /run/identity, readOnly: true}]
+  volumes:
+  - name: identity
+    secret:
+      secretName: identity
+      items: [{key: client.conf, path: client.conf}]
+EOF
+kubectl -n mock4-q09 wait --for=condition=Ready pod/identity-client --timeout=120s
+```'''
+
+[[tasks.checks]]
+name = '''The process sees the identity from both consumption paths'''
+run = '''for i in $(seq 1 30); do v=$(kubectl -n mock4-q09 logs identity-client 2>/dev/null) && [ "$v" = 'training-client
+identity=training-client
+mode=practice' ] && echo ok && exit 0; sleep 2; done; exit 1'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''Environment is backed by the requested Secret'''
+run = '''test "$(kubectl -n mock4-q09 get secret identity -o jsonpath='{.type}')" = Opaque || exit 1
+v=$(kubectl -n mock4-q09 get pod identity-client -o jsonpath='{.spec.containers[0].env[?(@.name=="ACCOUNT")].valueFrom.secretKeyRef.name}|{.spec.containers[0].env[?(@.name=="ACCOUNT")].valueFrom.secretKeyRef.key}|{.spec.containers[0].env[?(@.name=="ACCOUNT")].value}|{.spec.containers[0].envFrom[*].secretRef.name}') || exit 1
+case "$v" in 'identity|ACCOUNT||'|'|||identity') echo ok;; *) exit 1;; esac'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''The mounted file is a read-only Secret projection with only the requested key'''
+run = '''name=$(kubectl -n mock4-q09 get pod identity-client -o jsonpath='{.spec.containers[0].volumeMounts[?(@.mountPath=="/run/identity")].name}') || exit 1
+[ -n "$name" ] || exit 1
+v=$(kubectl -n mock4-q09 get pod identity-client -o "jsonpath={.spec.volumes[?(@.name==\"$name\")].secret.secretName}|{.spec.volumes[?(@.name==\"$name\")].secret.items[*].key}|{.spec.containers[0].volumeMounts[?(@.mountPath==\"/run/identity\")].readOnly}") || exit 1
+[ "$v" = 'identity|client.conf|true' ] && [ "$(kubectl -n mock4-q09 exec identity-client -- cat /run/identity/client.conf)" = "$(cat "$PODDOJO_LAB_DIR/m4-client.conf")" ] && echo ok'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.negatives]]
+name = '''A literal environment value prints the expected text without Secret wiring'''
+run = '''kubectl -n mock4-q09 create secret generic identity --from-literal=ACCOUNT="$(sed -n "s/^ACCOUNT=//p" "$PODDOJO_LAB_DIR/m4-identity.env")" --from-file=client.conf="$PODDOJO_LAB_DIR/m4-client.conf" --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n mock4-q09 apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: identity-client}
+spec:
+  containers:
+  - name: client
+    image: busybox:1.36
+    command: [sh, -c, 'printf "%s\n" "$ACCOUNT"; cat /run/identity/client.conf; sleep 14400']
+    env:
+    - name: ACCOUNT
+      value: training-client
+    volumeMounts: [{name: identity, mountPath: /run/identity, readOnly: true}]
+  volumes:
+  - name: identity
+    secret:
+      secretName: identity
+      items: [{key: client.conf, path: client.conf}]
+EOF
+kubectl -n mock4-q09 wait --for=condition=Ready pod/identity-client --timeout=120s'''
+undo = '''kubectl -n mock4-q09 delete pod identity-client --ignore-not-found --wait=true
+kubectl -n mock4-q09 delete secret identity --ignore-not-found'''
+
+[[tasks.alternatives]]
+name = '''envFrom imports ACCOUNT from the same Secret'''
+run = '''kubectl -n mock4-q09 create secret generic identity --from-literal=ACCOUNT="$(sed -n "s/^ACCOUNT=//p" "$PODDOJO_LAB_DIR/m4-identity.env")" --from-file=client.conf="$PODDOJO_LAB_DIR/m4-client.conf" --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n mock4-q09 apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: identity-client}
+spec:
+  containers:
+  - name: client
+    image: busybox:1.36
+    command: [sh, -c, 'printf "%s\n" "$ACCOUNT"; cat /run/identity/client.conf; sleep 14400']
+    envFrom:
+    - secretRef: {name: identity}
+    volumeMounts: [{name: identity, mountPath: /run/identity, readOnly: true}]
+  volumes:
+  - name: identity
+    secret:
+      secretName: identity
+      items: [{key: client.conf, path: client.conf}]
+EOF
+kubectl -n mock4-q09 wait --for=condition=Ready pod/identity-client --timeout=120s'''
+undo = '''kubectl -n mock4-q09 delete pod identity-client --ignore-not-found --wait=true
+kubectl -n mock4-q09 delete secret identity --ignore-not-found'''
+
+[[tasks]]
+id = "q10"
+domain = "config-security"
+weight = 5
+title = "Repair incident-reader authorization without widening scope"
+namespace = "mock4-q10"
+task = '''In `mock4-q10`, Role `incident-read` grants excessive verbs and its binding targets the wrong account. Repair the existing Role and RoleBinding for ServiceAccount `incident-reader`: allow get/list/watch Pods and get Pod logs, only in this namespace. Deny Secrets, creating/deleting Pods, Pod exec, and Pod access in `default`; do not use cluster-wide bindings. Create running Pod `toolbox` with busybox:1.36, sleep 14400, that ServiceAccount, and automountServiceAccountToken=false. Validate authorization with impersonated `kubectl auth can-i`; the toolbox itself does not need an API token.'''
+setup = [
+'''kubectl -n mock4-q10 apply -f - <<'EOF'
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: incident-reader}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: incident-read}
+rules:
+- apiGroups: ['']
+  resources: [pods, secrets]
+  verbs: ['*']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: incident-read}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: incident-read}
+subjects:
+- {kind: ServiceAccount, name: default, namespace: mock4-q10}
+EOF'''
+]
+solution = '''```bash
+kubectl -n mock4-q10 apply -f - <<'EOF'
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: incident-reader}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: incident-read}
+rules:
+- apiGroups: ['']
+  resources: [pods]
+  verbs: [get, list, watch]
+- apiGroups: ['']
+  resources: [pods/log]
+  verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: incident-read}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: incident-read}
+subjects:
+- {kind: ServiceAccount, name: incident-reader, namespace: mock4-q10}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: toolbox}
+spec:
+  serviceAccountName: incident-reader
+  automountServiceAccountToken: false
+  containers:
+  - {name: toolbox, image: 'busybox:1.36', command: [sleep, '14400']}
+EOF
+kubectl -n mock4-q10 wait --for=condition=Ready pod/toolbox --timeout=120s
+```'''
+
+[[tasks.checks]]
+name = '''The account can inspect Pods and logs'''
+run = '''for verb in get list watch; do [ "$(kubectl auth can-i --as=system:serviceaccount:mock4-q10:incident-reader -n mock4-q10 "$verb" pods)" = yes ] || exit 1; done
+[ "$(kubectl auth can-i --as=system:serviceaccount:mock4-q10:incident-reader -n mock4-q10 get pods --subresource=log)" = yes ] && echo ok'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''Sensitive operations and cross-namespace reads are denied'''
+run = '''kubectl -n mock4-q10 get pod toolbox >/dev/null || exit 1
+for op in 'get secrets' 'list secrets' 'create pods' 'delete pods' 'update pods' 'patch pods' 'deletecollection pods' 'create pods/exec' 'get configmaps' 'create deployments.apps'; do
+v=$(kubectl auth can-i --as=system:serviceaccount:mock4-q10:incident-reader -n mock4-q10 $op 2>/dev/null); rc=$?; [ "$rc" = 1 ] && [ "$v" = no ] || exit 1
+done
+v=$(kubectl auth can-i --as=system:serviceaccount:mock4-q10:incident-reader -n default list pods 2>/dev/null); rc=$?; [ "$rc" = 1 ] && [ "$v" = no ] && echo ok'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''The running toolbox uses the intended identity without a default token'''
+run = '''for i in $(seq 1 30); do v=$(kubectl -n mock4-q10 get pod toolbox -o jsonpath='{.spec.serviceAccountName}|{.spec.automountServiceAccountToken}|{.status.phase}' 2>/dev/null) && [ "$v" = 'incident-reader|false|Running' ] && echo ok && exit 0; sleep 2; done; exit 1'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.negatives]]
+name = '''Binding the right account while retaining wildcard Pod and Secret access'''
+run = '''kubectl -n mock4-q10 apply -f - <<'EOF'
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: incident-reader}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: incident-read}
+rules:
+- apiGroups: ['']
+  resources: [pods, secrets]
+  verbs: ['*']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: incident-read}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: incident-read}
+subjects:
+- {kind: ServiceAccount, name: incident-reader, namespace: mock4-q10}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: toolbox}
+spec:
+  serviceAccountName: incident-reader
+  automountServiceAccountToken: false
+  containers:
+  - {name: toolbox, image: 'busybox:1.36', command: [sleep, '14400']}
+EOF'''
+undo = '''kubectl -n mock4-q10 delete pod toolbox --ignore-not-found --wait=true
+kubectl -n mock4-q10 apply -f - <<'EOF'
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: incident-reader}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: incident-read}
+rules:
+- apiGroups: ['']
+  resources: [pods, secrets]
+  verbs: ['*']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: incident-read}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: incident-read}
+subjects:
+- {kind: ServiceAccount, name: default, namespace: mock4-q10}
+EOF'''
+
+[[tasks.alternatives]]
+name = '''Separate get/list/watch rules instead of a shared verb list'''
+run = '''kubectl -n mock4-q10 apply -f - <<'EOF'
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: incident-reader}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: incident-read}
+rules:
+- apiGroups: ['']
+  resources: [pods]
+  verbs: [get]
+- apiGroups: ['']
+  resources: [pods]
+  verbs: [list, watch]
+- apiGroups: ['']
+  resources: [pods/log]
+  verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: incident-read}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: incident-read}
+subjects:
+- {kind: ServiceAccount, name: incident-reader, namespace: mock4-q10}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: toolbox}
+spec:
+  serviceAccountName: incident-reader
+  automountServiceAccountToken: false
+  containers:
+  - {name: toolbox, image: 'busybox:1.36', command: [sleep, '14400']}
+EOF
+kubectl -n mock4-q10 wait --for=condition=Ready pod/toolbox --timeout=120s'''
+undo = '''kubectl -n mock4-q10 delete pod toolbox --ignore-not-found --wait=true
+kubectl -n mock4-q10 apply -f - <<'EOF'
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: incident-reader}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: incident-read}
+rules:
+- apiGroups: ['']
+  resources: [pods, secrets]
+  verbs: ['*']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: incident-read}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: incident-read}
+subjects:
+- {kind: ServiceAccount, name: default, namespace: mock4-q10}
+EOF'''
+
+[[tasks]]
+id = "q11"
+domain = "config-security"
+weight = 5
+title = "Fit two two-container replicas under admission limits"
+namespace = "mock4-q11"
+task = '''Deployment `aggregator` in `mock4-q11` has no usable replicas because its requests exceed the existing LimitRange and ResourceQuota. Keep both containers, their images/commands, two replicas, and its no-surge rolling strategy. Set each container to requests 40m CPU/16Mi memory and limits 80m CPU/32Mi memory (equivalent quantity syntax is accepted). Do not alter or delete `team-budget` or `container-bounds`. Diagnose admission from ReplicaSet events and wait for two ready replicas. Count both containers when budgeting the four running containers.'''
+setup = [
+'''kubectl -n mock4-q11 apply -f - <<'EOF'
+apiVersion: v1
+kind: ResourceQuota
+metadata: {name: team-budget}
+spec:
+  hard: {requests.cpu: 200m, requests.memory: 128Mi, limits.cpu: 400m, limits.memory: 256Mi, pods: '4'}
+---
+apiVersion: v1
+kind: LimitRange
+metadata: {name: container-bounds}
+spec:
+  limits:
+  - type: Container
+    min: {cpu: 25m, memory: 8Mi}
+    max: {cpu: 150m, memory: 64Mi}
+    defaultRequest: {cpu: 50m, memory: 16Mi}
+    default: {cpu: 100m, memory: 32Mi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: aggregator}
+spec:
+  replicas: 2
+  strategy: {type: RollingUpdate, rollingUpdate: {maxSurge: 0, maxUnavailable: 1}}
+  selector: {matchLabels: {app: aggregator}}
+  template:
+    metadata: {labels: {app: aggregator}}
+    spec:
+      containers:
+      - name: app
+        image: busybox:1.36
+        command: [sleep, '14400']
+        resources: {requests: {cpu: 500m, memory: 16Mi}, limits: {cpu: 500m, memory: 32Mi}}
+      - name: forwarder
+        image: busybox:1.36
+        command: [sleep, '14400']
+        resources: {requests: {cpu: 500m, memory: 16Mi}, limits: {cpu: 500m, memory: 32Mi}}
+EOF
+kubectl -n mock4-q11 get quota team-budget -o jsonpath='{.spec.hard}' > "$PODDOJO_LAB_DIR/m4-quota.txt"
+kubectl -n mock4-q11 get limitrange container-bounds -o jsonpath='{.spec.limits}' > "$PODDOJO_LAB_DIR/m4-limits.txt"'''
+]
+solution = '''```bash
+kubectl -n mock4-q11 set resources deployment/aggregator --containers="*" --requests=cpu=40m,memory=16Mi --limits=cpu=80m,memory=32Mi
+kubectl -n mock4-q11 rollout status deployment/aggregator --timeout=120s
+```'''
+
+[[tasks.checks]]
+name = '''Both containers have the required effective resource quantities'''
+run = '''kubectl -n mock4-q11 get deploy aggregator -o jsonpath='{range .spec.template.spec.containers[*]}{.resources.requests.cpu}{" "}{.resources.requests.memory}{" "}{.resources.limits.cpu}{" "}{.resources.limits.memory}{"\n"}{end}' | awk '
+function cpu(v) { if (v ~ /m$/) {sub(/m$/, "", v); return v/1000} return v+0 }
+function mem(v) {if(v ~ /Mi$/){sub(/Mi$/, "", v);return v*1048576} if(v ~ /Ki$/){sub(/Ki$/, "", v);return v*1024} if(v ~ /Gi$/){sub(/Gi$/, "", v);return v*1073741824} return v+0}
+{if (cpu($1)!=0.04 || mem($2)!=16777216 || cpu($3)!=0.08 || mem($4)!=33554432) bad=1; n++}
+END {if(n==2 && !bad) print "ok"; else exit 1}' '''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''Two updated replicas fit under the unchanged admission rules'''
+run = '''for i in $(seq 1 30); do
+[ "$(kubectl -n mock4-q11 get deploy aggregator -o jsonpath='{.spec.replicas}|{.status.updatedReplicas}|{.status.readyReplicas}|{.status.replicas}|{.spec.strategy.rollingUpdate.maxSurge}|{.spec.strategy.rollingUpdate.maxUnavailable}')" = '2|2|2|2|0|1' ] && [ "$(kubectl -n mock4-q11 get quota team-budget -o jsonpath='{.spec.hard}')" = "$(cat "$PODDOJO_LAB_DIR/m4-quota.txt")" ] && [ "$(kubectl -n mock4-q11 get limitrange container-bounds -o jsonpath='{.spec.limits}')" = "$(cat "$PODDOJO_LAB_DIR/m4-limits.txt")" ] && echo ok && exit 0
+sleep 2; done; exit 1'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.negatives]]
+name = '''Only the app is corrected, leaving forwarder outside admission bounds'''
+run = '''kubectl -n mock4-q11 set resources deployment/aggregator --containers=app --requests=cpu=40m,memory=16Mi --limits=cpu=80m,memory=32Mi'''
+undo = '''kubectl -n mock4-q11 delete deploy aggregator --ignore-not-found --wait=true
+kubectl -n mock4-q11 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: aggregator}
+spec:
+  replicas: 2
+  strategy: {type: RollingUpdate, rollingUpdate: {maxSurge: 0, maxUnavailable: 1}}
+  selector: {matchLabels: {app: aggregator}}
+  template:
+    metadata: {labels: {app: aggregator}}
+    spec:
+      containers:
+      - name: app
+        image: busybox:1.36
+        command: [sleep, '14400']
+        resources: {requests: {cpu: 500m, memory: 16Mi}, limits: {cpu: 500m, memory: 32Mi}}
+      - name: forwarder
+        image: busybox:1.36
+        command: [sleep, '14400']
+        resources: {requests: {cpu: 500m, memory: 16Mi}, limits: {cpu: 500m, memory: 32Mi}}
+EOF'''
+
+[[tasks.alternatives]]
+name = '''Decimal CPU and byte memory quantities have the same meaning'''
+run = '''kubectl -n mock4-q11 set resources deployment/aggregator --containers="*" --requests=cpu=0.04,memory=16777216 --limits=cpu=0.08,memory=33554432
+kubectl -n mock4-q11 rollout status deployment/aggregator --timeout=120s'''
+undo = '''kubectl -n mock4-q11 delete deploy aggregator --ignore-not-found --wait=true
+kubectl -n mock4-q11 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: aggregator}
+spec:
+  replicas: 2
+  strategy: {type: RollingUpdate, rollingUpdate: {maxSurge: 0, maxUnavailable: 1}}
+  selector: {matchLabels: {app: aggregator}}
+  template:
+    metadata: {labels: {app: aggregator}}
+    spec:
+      containers:
+      - name: app
+        image: busybox:1.36
+        command: [sleep, '14400']
+        resources: {requests: {cpu: 500m, memory: 16Mi}, limits: {cpu: 500m, memory: 32Mi}}
+      - name: forwarder
+        image: busybox:1.36
+        command: [sleep, '14400']
+        resources: {requests: {cpu: 500m, memory: 16Mi}, limits: {cpu: 500m, memory: 32Mi}}
+EOF'''
+
+[[tasks]]
+id = "q12"
+domain = "config-security"
+weight = 5
+title = "Give a hardened report process a writable cache"
+namespace = "mock4-q12"
+task = '''Deployment `report-cache` in `mock4-q12` cannot initialize its report file. Keep the image, command, readiness probe, one replica and existing security settings: UID 1200, GID/fsGroup 2000, non-root, RuntimeDefault seccomp, no privilege escalation, dropped ALL capabilities, read-only image filesystem and no API token mount. Fix storage by mounting an emptyDir named `cache` at `/var/cache/report`. Do not weaken security or use hostPath/PVC storage. The running process must serve report-cache-online on port 8080.'''
+setup = [
+'''kubectl -n mock4-q12 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: report-cache}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: report-cache}}
+  template:
+    metadata: {labels: {app: report-cache}}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1200
+        runAsGroup: 2000
+        fsGroup: 2000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+      - name: report
+        image: python:3.12-alpine
+        command: [sh, -ec, 'printf "report-cache-online\n" > /var/cache/report/index.html; cd /var/cache/report; exec python -m http.server 8080']
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: [ALL]}
+        readinessProbe: {httpGet: {path: /, port: 8080}, periodSeconds: 2}
+EOF'''
+]
+solution = '''```bash
+kubectl -n mock4-q12 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: report-cache}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: report-cache}}
+  template:
+    metadata: {labels: {app: report-cache}}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1200
+        runAsGroup: 2000
+        fsGroup: 2000
+        seccompProfile: {type: RuntimeDefault}
+      volumes: [{name: cache, emptyDir: {}}]
+      containers:
+      - name: report
+        image: python:3.12-alpine
+        command: [sh, -ec, 'printf "report-cache-online\n" > /var/cache/report/index.html; cd /var/cache/report; exec python -m http.server 8080']
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: [ALL]}
+        volumeMounts: [{name: cache, mountPath: /var/cache/report}]
+        readinessProbe: {httpGet: {path: /, port: 8080}, periodSeconds: 2}
+EOF
+kubectl -n mock4-q12 rollout status deployment/report-cache --timeout=120s
+```'''
+
+[[tasks.checks]]
+name = '''A writable emptyDir fixes the real report initialization'''
+run = '''for i in $(seq 1 30); do
+v=$(kubectl -n mock4-q12 exec deploy/report-cache -- python -c 'import os,urllib.request; print(os.getuid()); print(os.getgid()); print(urllib.request.urlopen("http://127.0.0.1:8080/",timeout=2).read().decode().strip())' 2>/dev/null)
+[ "$v" = "$(printf '1200\n2000\nreport-cache-online')" ] && echo ok && exit 0
+sleep 2; done; exit 1'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''The repaired workload retains all security boundaries'''
+run = '''v=$(kubectl -n mock4-q12 get deploy report-cache -o jsonpath='{.spec.template.spec.automountServiceAccountToken}|{.spec.template.spec.securityContext.runAsNonRoot}|{.spec.template.spec.securityContext.fsGroup}|{.spec.template.spec.securityContext.seccompProfile.type}|{.spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation}|{.spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem}|{.spec.template.spec.containers[0].securityContext.capabilities.drop[*]}|{.spec.template.spec.volumes[?(@.name=="cache")].emptyDir}|{.spec.template.spec.containers[0].volumeMounts[?(@.name=="cache")].mountPath}') || exit 1
+[ "$v" = 'false|true|2000|RuntimeDefault|false|true|ALL|{}|/var/cache/report' ] && echo ok'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.negatives]]
+name = '''A writable mount works while the image filesystem is accidentally writable too'''
+run = '''kubectl -n mock4-q12 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: report-cache}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: report-cache}}
+  template:
+    metadata: {labels: {app: report-cache}}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1200
+        runAsGroup: 2000
+        fsGroup: 2000
+        seccompProfile: {type: RuntimeDefault}
+      volumes: [{name: cache, emptyDir: {}}]
+      containers:
+      - name: report
+        image: python:3.12-alpine
+        command: [sh, -ec, 'printf "report-cache-online\n" > /var/cache/report/index.html; cd /var/cache/report; exec python -m http.server 8080']
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities: {drop: [ALL]}
+        volumeMounts: [{name: cache, mountPath: /var/cache/report}]
+        readinessProbe: {httpGet: {path: /, port: 8080}, periodSeconds: 2}
+EOF
+kubectl -n mock4-q12 rollout status deployment/report-cache --timeout=120s'''
+undo = '''kubectl -n mock4-q12 delete deploy report-cache --ignore-not-found --wait=true
+kubectl -n mock4-q12 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: report-cache}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: report-cache}}
+  template:
+    metadata: {labels: {app: report-cache}}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1200
+        runAsGroup: 2000
+        fsGroup: 2000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+      - name: report
+        image: python:3.12-alpine
+        command: [sh, -ec, 'printf "report-cache-online\n" > /var/cache/report/index.html; cd /var/cache/report; exec python -m http.server 8080']
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: [ALL]}
+        readinessProbe: {httpGet: {path: /, port: 8080}, periodSeconds: 2}
+EOF'''
+
+[[tasks.alternatives]]
+name = '''UID and primary GID set on the container retain the effective identity'''
+run = '''kubectl -n mock4-q12 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: report-cache}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: report-cache}}
+  template:
+    metadata: {labels: {app: report-cache}}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 2000
+        seccompProfile: {type: RuntimeDefault}
+      volumes: [{name: cache, emptyDir: {}}]
+      containers:
+      - name: report
+        image: python:3.12-alpine
+        command: [sh, -ec, 'printf "report-cache-online\n" > /var/cache/report/index.html; cd /var/cache/report; exec python -m http.server 8080']
+        securityContext:
+          runAsUser: 1200
+          runAsGroup: 2000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: [ALL]}
+        volumeMounts: [{name: cache, mountPath: /var/cache/report}]
+        readinessProbe: {httpGet: {path: /, port: 8080}, periodSeconds: 2}
+EOF
+kubectl -n mock4-q12 rollout status deployment/report-cache --timeout=120s'''
+undo = '''kubectl -n mock4-q12 delete deploy report-cache --ignore-not-found --wait=true
+kubectl -n mock4-q12 apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: report-cache}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: report-cache}}
+  template:
+    metadata: {labels: {app: report-cache}}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1200
+        runAsGroup: 2000
+        fsGroup: 2000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+      - name: report
+        image: python:3.12-alpine
+        command: [sh, -ec, 'printf "report-cache-online\n" > /var/cache/report/index.html; cd /var/cache/report; exec python -m http.server 8080']
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: [ALL]}
+        readinessProbe: {httpGet: {path: /, port: 8080}, periodSeconds: 2}
+EOF'''
+
+[[tasks]]
+id = "q13"
+domain = "config-security"
+weight = 4
+title = "Project a short-lived token for a separate audience"
+namespace = "mock4-q13"
+task = '''In `mock4-q13`, create ServiceAccount and Pod both named `report-agent`. The Pod uses python:3.12-alpine, sleeps 14400 and sets automountServiceAccountToken=false. Explicitly project a ServiceAccount token using volume `report-token` into read-only mount `/var/run/report`, file `token`, for audience reports.poddojo.test with requested expirationSeconds 600. Use the TokenRequest-backed projected-volume mechanism, not a manually created Secret or `kubectl create token` pasted into a file. The default Kubernetes API token path must be absent. Verify the token audience and subject locally inside the Pod without printing or saving the complete token.'''
+solution = '''```bash
+kubectl -n mock4-q13 apply -f - <<'EOF'
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: report-agent}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: report-agent}
+spec:
+  serviceAccountName: report-agent
+  automountServiceAccountToken: false
+  containers:
+  - name: agent
+    image: python:3.12-alpine
+    command: [sleep, '14400']
+    volumeMounts: [{name: report-token, mountPath: /var/run/report, readOnly: true}]
+  volumes:
+  - name: report-token
+    projected:
+      sources:
+      - serviceAccountToken:
+          audience: reports.poddojo.test
+          expirationSeconds: 600
+          path: token
+EOF
+kubectl -n mock4-q13 wait --for=condition=Ready pod/report-agent --timeout=120s
+```'''
+
+[[tasks.checks]]
+name = '''A real projected token has the requested identity and audience'''
+run = '''for i in $(seq 1 30); do v=$(kubectl -n mock4-q13 exec report-agent -- python -c 'import base64,json,pathlib; t=pathlib.Path("/var/run/report/token").read_text().split(".")[1]; c=json.loads(base64.urlsafe_b64decode(t+"="*(-len(t)%4))); assert c["sub"]=="system:serviceaccount:mock4-q13:report-agent"; assert c["aud"]==["reports.poddojo.test"]; assert not pathlib.Path("/var/run/secrets/kubernetes.io/serviceaccount/token").exists(); print("ok")'  2>/dev/null) && [ "$v" = 'ok' ] && echo ok && exit 0; sleep 2; done; exit 1'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''Token lifetime and projection source are declared correctly'''
+run = '''kubectl -n mock4-q13 get pod report-agent -o jsonpath='{.spec.serviceAccountName}|{.spec.automountServiceAccountToken}|{.spec.volumes[?(@.name=="report-token")].projected.sources[0].serviceAccountToken.audience}|{.spec.volumes[?(@.name=="report-token")].projected.sources[0].serviceAccountToken.expirationSeconds}|{.spec.volumes[?(@.name=="report-token")].projected.sources[0].serviceAccountToken.path}|{.spec.containers[0].volumeMounts[0].readOnly}' '''
+equals = '''report-agent|false|reports.poddojo.test|600|token|true'''
+timeout = 90
+
+[[tasks.negatives]]
+name = '''The custom token is correct but an unnecessary default API token is mounted too'''
+run = '''kubectl -n mock4-q13 apply -f - <<'EOF'
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: report-agent}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: report-agent}
+spec:
+  serviceAccountName: report-agent
+  automountServiceAccountToken: true
+  containers:
+  - name: agent
+    image: python:3.12-alpine
+    command: [sleep, '14400']
+    volumeMounts: [{name: report-token, mountPath: /var/run/report, readOnly: true}]
+  volumes:
+  - name: report-token
+    projected:
+      sources:
+      - serviceAccountToken:
+          audience: reports.poddojo.test
+          expirationSeconds: 600
+          path: token
+EOF
+kubectl -n mock4-q13 wait --for=condition=Ready pod/report-agent --timeout=120s'''
+undo = '''kubectl -n mock4-q13 delete pod report-agent --ignore-not-found --wait=true
+kubectl -n mock4-q13 delete serviceaccount report-agent --ignore-not-found'''
+
+[[tasks.alternatives]]
+name = '''Projected token with restrictive file mode'''
+run = '''kubectl -n mock4-q13 apply -f - <<'EOF'
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: report-agent}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: report-agent}
+spec:
+  serviceAccountName: report-agent
+  automountServiceAccountToken: false
+  containers:
+  - name: agent
+    image: python:3.12-alpine
+    command: [sleep, '14400']
+    volumeMounts: [{name: report-token, mountPath: /var/run/report, readOnly: true}]
+  volumes:
+  - name: report-token
+    projected:
+      defaultMode: 0400
+      sources:
+      - serviceAccountToken:
+          audience: reports.poddojo.test
+          expirationSeconds: 600
+          path: token
+EOF
+kubectl -n mock4-q13 wait --for=condition=Ready pod/report-agent --timeout=120s'''
+undo = '''kubectl -n mock4-q13 delete pod report-agent --ignore-not-found --wait=true
+kubectl -n mock4-q13 delete serviceaccount report-agent --ignore-not-found'''
+
+[[tasks]]
+id = "q14"
+domain = "networking"
+weight = 5
+title = "Publish a selectorless archive with an EndpointSlice"
+namespace = "mock4-q14"
+task = '''In `mock4-q14`, the existing Pod `archive` serves archive-v4 on 8080. Preserve its UID and labels. Publish it as selectorless ClusterIP Service `archive`, port 8090 named http, targetPort 8080. Create discovery.k8s.io/v1 EndpointSlice `archive-manual`, IPv4, linked to that Service by kubernetes.io/service-name=archive, with the Pod's actual IP, TCP port 8080 named http and a ready endpoint (true or omitted). Set its managed-by label to poddojo-manual and targetRef to the existing Pod. Do not add a Service selector or edit controller-managed slices. Existing `client` must fetch http://archive:8090/.'''
+setup = [
+'''kubectl -n mock4-q14 run archive --image=busybox:1.36 --restart=Never --labels=purpose=legacy --dry-run=client -o yaml --command -- sh -c 'mkdir -p /www; echo archive-v4 > /www/index.html; exec httpd -f -p 8080 -h /www' | kubectl apply -f -
+kubectl -n mock4-q14 run client --image=busybox:1.36 --restart=Never --dry-run=client -o yaml --command -- sleep 14400 | kubectl apply -f -
+kubectl -n mock4-q14 wait --for=condition=Ready pod/archive pod/client --timeout=120s
+kubectl -n mock4-q14 get pod archive -o jsonpath='{.metadata.uid}' > "$PODDOJO_LAB_DIR/m4-archive-uid.txt"'''
+]
+solution = '''```bash
+ip=$(kubectl -n mock4-q14 get pod archive -o jsonpath='{.status.podIP}')
+kubectl -n mock4-q14 apply -f - <<EOF
+apiVersion: v1
+kind: Service
+metadata: {name: archive}
+spec:
+  ports: [{name: http, port: 8090, targetPort: 8080}]
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: archive-manual
+  labels:
+    kubernetes.io/service-name: archive
+    endpointslice.kubernetes.io/managed-by: poddojo-manual
+addressType: IPv4
+ports: [{name: http, protocol: TCP, port: 8080}]
+endpoints:
+- addresses: ["$ip"]
+  conditions: {ready: true}
+  targetRef: {kind: Pod, name: archive, namespace: mock4-q14}
+EOF
+```'''
+
+[[tasks.checks]]
+name = '''Traffic reaches the existing archive through the selectorless Service'''
+run = '''for i in $(seq 1 30); do v=$(kubectl -n mock4-q14 exec client -- wget -qO- -T 2 http://archive:8090/ 2>/dev/null) && [ "$v" = 'archive-v4' ] && echo ok && exit 0; sleep 2; done; exit 1'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''Service contract and original Pod identity are preserved'''
+run = '''test "$(kubectl -n mock4-q14 get pod archive -o jsonpath='{.metadata.uid}')" = "$(cat "$PODDOJO_LAB_DIR/m4-archive-uid.txt")" && test "$(kubectl -n mock4-q14 get service archive -o jsonpath='{.spec.type}|{.spec.selector}|{.spec.ports[0].name}|{.spec.ports[0].port}|{.spec.ports[0].targetPort}')" = 'ClusterIP||http|8090|8080' && test "$(kubectl -n mock4-q14 get pod archive -o jsonpath='{.metadata.labels.purpose}')" = legacy && echo ok'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''Manual slice links the correct ready Pod and listener'''
+run = '''ip=$(kubectl -n mock4-q14 get pod archive -o jsonpath='{.status.podIP}') || exit 1
+v=$(kubectl -n mock4-q14 get endpointslice archive-manual -o jsonpath='{.metadata.labels.kubernetes\.io/service-name}|{.metadata.labels.endpointslice\.kubernetes\.io/managed-by}|{.addressType}|{.ports[0].name}|{.ports[0].port}|{.ports[0].protocol}|{.endpoints[0].addresses[0]}|{.endpoints[0].conditions.ready}|{.endpoints[0].targetRef.kind}|{.endpoints[0].targetRef.name}') || exit 1
+case "$v" in "archive|poddojo-manual|IPv4|http|8080|TCP|$ip|true|Pod|archive"|"archive|poddojo-manual|IPv4|http|8080|TCP|$ip||Pod|archive") echo ok;; *) exit 1;; esac'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.negatives]]
+name = '''A slice exists but its endpoint points to the Service port instead of the server port'''
+run = '''ip=$(kubectl -n mock4-q14 get pod archive -o jsonpath='{.status.podIP}')
+kubectl -n mock4-q14 apply -f - <<EOF
+apiVersion: v1
+kind: Service
+metadata: {name: archive}
+spec:
+  ports: [{name: http, port: 8090, targetPort: 8080}]
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: archive-manual
+  labels:
+    kubernetes.io/service-name: archive
+    endpointslice.kubernetes.io/managed-by: poddojo-manual
+addressType: IPv4
+ports: [{name: http, protocol: TCP, port: 8090}]
+endpoints:
+- addresses: ["$ip"]
+  conditions: {ready: true}
+  targetRef: {kind: Pod, name: archive, namespace: mock4-q14}
+EOF'''
+undo = '''kubectl -n mock4-q14 delete service archive --ignore-not-found
+kubectl -n mock4-q14 delete endpointslice archive-manual --ignore-not-found'''
+
+[[tasks.alternatives]]
+name = '''Omitted ready condition has the same ready endpoint semantics'''
+run = '''ip=$(kubectl -n mock4-q14 get pod archive -o jsonpath='{.status.podIP}')
+kubectl -n mock4-q14 apply -f - <<EOF
+apiVersion: v1
+kind: Service
+metadata: {name: archive}
+spec:
+  ports: [{name: http, port: 8090, targetPort: 8080}]
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: archive-manual
+  labels:
+    kubernetes.io/service-name: archive
+    endpointslice.kubernetes.io/managed-by: poddojo-manual
+addressType: IPv4
+ports: [{name: http, protocol: TCP, port: 8080}]
+endpoints:
+- addresses: ["$ip"]
+  targetRef: {kind: Pod, name: archive, namespace: mock4-q14}
+EOF'''
+undo = '''kubectl -n mock4-q14 delete service archive --ignore-not-found
+kubectl -n mock4-q14 delete endpointslice archive-manual --ignore-not-found'''
+
+[[tasks]]
+id = "q15"
+domain = "networking"
+weight = 6
+title = "Migrate a ledger Ingress and preserve its path semantics"
+namespace = "mock4-q15"
+task = '''File `$PODDOJO_LAB_DIR/m4-ledger-legacy.yaml` cannot be applied to Kubernetes v1.37. Capture served networking APIs with `kubectl api-resources --api-group=networking.k8s.io -o wide` in `$PODDOJO_LAB_DIR/m4-networking-apis.txt`. Write a corrected stable-API manifest to `$PODDOJO_LAB_DIR/m4-ledger.yaml` and apply it as Ingress `ledger` in `mock4-q15`, class traefik, host ledger.exam.test. Route `/ledger` as Prefix to feed:80 and `/audit` as Exact to audit:80. `/audit/deep`, `/ledgerish` and other hosts must get controller 404s. Do not change the existing backends or add a default backend. Migrate backend field structure as well as apiVersion. The controller is reachable inside the cluster at http://traefik.dojo-ingress from deployment/probe in dojo-ingress.'''
+setup = [
+'''kubectl -n mock4-q15 apply -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: ledger-template}
+data:
+  default.conf.template: |
+    server { listen 80; location / { default_type text/plain; return 200 "${BACKEND} $request_uri\n"; } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: feed}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: feed}}
+  template:
+    metadata: {labels: {app: feed}}
+    spec:
+      volumes:
+      - name: template
+        configMap: {name: ledger-template}
+      containers:
+      - name: http
+        image: nginx:1.27-alpine
+        env: [{name: BACKEND, value: feed}]
+        volumeMounts: [{name: template, mountPath: /etc/nginx/templates}]
+        readinessProbe: {httpGet: {path: /, port: 80}, periodSeconds: 2}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: feed}
+spec:
+  selector: {app: feed}
+  ports: [{name: http, port: 80, targetPort: 80}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: audit}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: audit}}
+  template:
+    metadata: {labels: {app: audit}}
+    spec:
+      volumes:
+      - name: template
+        configMap: {name: ledger-template}
+      containers:
+      - name: http
+        image: nginx:1.27-alpine
+        env: [{name: BACKEND, value: audit}]
+        volumeMounts: [{name: template, mountPath: /etc/nginx/templates}]
+        readinessProbe: {httpGet: {path: /, port: 80}, periodSeconds: 2}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: audit}
+spec:
+  selector: {app: audit}
+  ports: [{name: http, port: 80, targetPort: 80}]
+EOF
+kubectl -n mock4-q15 rollout status deployment/feed --timeout=120s
+kubectl -n mock4-q15 rollout status deployment/audit --timeout=120s
+cat > "$PODDOJO_LAB_DIR/m4-ledger-legacy.yaml" <<'EOF'
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata: {name: ledger, namespace: mock4-q15}
+spec:
+  rules:
+  - host: ledger.exam.test
+    http:
+      paths:
+      - path: /ledger
+        backend: {serviceName: feed, servicePort: 80}
+      - path: /audit
+        backend: {serviceName: audit, servicePort: 80}
+EOF'''
+]
+solution = '''```bash
+kubectl api-resources --api-group=networking.k8s.io -o wide > "$PODDOJO_LAB_DIR/m4-networking-apis.txt"
+cat > "$PODDOJO_LAB_DIR/m4-ledger.yaml" <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: ledger, namespace: mock4-q15}
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: ledger.exam.test
+    http:
+      paths:
+      - path: /ledger
+        pathType: Prefix
+        backend: {service: {name: feed, port: {number: 80}}}
+      - path: /audit
+        pathType: Exact
+        backend: {service: {name: audit, port: {number: 80}}}
+EOF
+kubectl apply -f "$PODDOJO_LAB_DIR/m4-ledger.yaml"
+```'''
+
+[[tasks.checks]]
+name = '''Stable API discovery and the migrated manifest are captured'''
+run = '''grep -E 'ingresses.*networking.k8s.io/v1' "$PODDOJO_LAB_DIR/m4-networking-apis.txt" >/dev/null || exit 1
+[ "$(kubectl create --dry-run=client -f "$PODDOJO_LAB_DIR/m4-ledger.yaml" -o jsonpath='{.apiVersion}|{.metadata.name}|{.metadata.namespace}|{.spec.ingressClassName}')" = 'networking.k8s.io/v1|ledger|mock4-q15|traefik' ] || exit 1
+[ "$(kubectl create --dry-run=client -f "$PODDOJO_LAB_DIR/m4-ledger.yaml" -o jsonpath='{.spec}')" = "$(kubectl -n mock4-q15 get ingress ledger -o jsonpath='{.spec}')" ] && echo ok'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''Host routing, the exact route and the prefix route all work'''
+run = '''for i in $(seq 1 20); do
+[ "$(kubectl -n dojo-ingress exec deploy/probe -- curl -sS --max-time 3 -H 'Host: ledger.exam.test' http://traefik.dojo-ingress/ledger/v1 2>/dev/null)" = 'feed /ledger/v1' ] && [ "$(kubectl -n dojo-ingress exec deploy/probe -- curl -sS --max-time 3 -H 'Host: ledger.exam.test' http://traefik.dojo-ingress/ledger 2>/dev/null)" = 'feed /ledger' ] && [ "$(kubectl -n dojo-ingress exec deploy/probe -- curl -sS --max-time 3 -H 'Host: ledger.exam.test' http://traefik.dojo-ingress/audit 2>/dev/null)" = 'audit /audit' ] && echo ok && exit 0
+sleep 2; done; exit 1'''
+equals = '''ok'''
+timeout = 180
+
+[[tasks.checks]]
+name = '''Wrong host, a false path prefix and a sub-path of the exact route stay unrouted'''
+run = '''kubectl -n mock4-q15 get ingress ledger >/dev/null || exit 1
+for i in $(seq 1 20); do
+a=$(kubectl -n dojo-ingress exec deploy/probe -- curl -sS -o /dev/null -w '%{http_code}' --max-time 3 -H 'Host: other.exam.test' http://traefik.dojo-ingress/ledger 2>/dev/null)
+b=$(kubectl -n dojo-ingress exec deploy/probe -- curl -sS -o /dev/null -w '%{http_code}' --max-time 3 -H 'Host: ledger.exam.test' http://traefik.dojo-ingress/ledgerish 2>/dev/null)
+c=$(kubectl -n dojo-ingress exec deploy/probe -- curl -sS -o /dev/null -w '%{http_code}' --max-time 3 -H 'Host: ledger.exam.test' http://traefik.dojo-ingress/audit/deep 2>/dev/null)
+[ "$a|$b|$c" = '404|404|404' ] && echo ok && exit 0
+sleep 2; done; exit 1'''
+equals = '''ok'''
+timeout = 180
+
+[[tasks.negatives]]
+name = '''Making the audit route Prefix also serves its sub-paths'''
+run = '''kubectl api-resources --api-group=networking.k8s.io -o wide > "$PODDOJO_LAB_DIR/m4-networking-apis.txt"
+cat > "$PODDOJO_LAB_DIR/m4-ledger.yaml" <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: ledger, namespace: mock4-q15}
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: ledger.exam.test
+    http:
+      paths:
+      - path: /ledger
+        pathType: Prefix
+        backend: {service: {name: feed, port: {number: 80}}}
+      - path: /audit
+        pathType: Prefix
+        backend: {service: {name: audit, port: {number: 80}}}
+EOF
+kubectl apply -f "$PODDOJO_LAB_DIR/m4-ledger.yaml"'''
+undo = '''kubectl -n mock4-q15 delete ingress ledger --ignore-not-found
+rm -f "$PODDOJO_LAB_DIR/m4-ledger.yaml" "$PODDOJO_LAB_DIR/m4-networking-apis.txt"'''
+
+[[tasks.alternatives]]
+name = '''Named Service ports are equivalent to numeric backend ports'''
+run = '''kubectl api-resources --api-group=networking.k8s.io -o wide > "$PODDOJO_LAB_DIR/m4-networking-apis.txt"
+cat > "$PODDOJO_LAB_DIR/m4-ledger.yaml" <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: ledger, namespace: mock4-q15}
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: ledger.exam.test
+    http:
+      paths:
+      - path: /ledger
+        pathType: Prefix
+        backend: {service: {name: feed, port: {name: http}}}
+      - path: /audit
+        pathType: Exact
+        backend: {service: {name: audit, port: {name: http}}}
+EOF
+kubectl apply -f "$PODDOJO_LAB_DIR/m4-ledger.yaml"'''
+undo = '''kubectl -n mock4-q15 delete ingress ledger --ignore-not-found
+rm -f "$PODDOJO_LAB_DIR/m4-ledger.yaml" "$PODDOJO_LAB_DIR/m4-networking-apis.txt"'''
+
+[[tasks]]
+id = "q16"
+domain = "networking"
+weight = 5
+title = "Close an additive policy leak without blocking approved traffic"
+namespace = "mock4-q16"
+task = '''Database Pod `database` in `mock4-q16` serves identical health content on TCP 8080 and 9090. Existing policy `allow-public` accidentally allows all ingress. Remove that leak and create ingress-only NetworkPolicy `database-access`, selecting app=database. Permit same-namespace role=api Pods to TCP 8080 and role=backup Pods to TCP 9090. Reject api→9090, backup→8080 and visitor→both. Keep the existing Pods, labels, commands and server listeners; no egress restrictions. Two separate allowed-client rules are appropriate. Verify both allowed and denied connections using the existing clients and the database Pod IP. Remember policies combine additively.'''
+setup = [
+'''kubectl -n mock4-q16 apply -f - <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata: {name: database, labels: {app: database}}
+spec:
+  containers:
+  - name: server
+    image: busybox:1.36
+    command: [sh, -ec, 'mkdir -p /www; echo database-online > /www/index.html; httpd -p 9090 -h /www; exec httpd -f -p 8080 -h /www']
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-public}
+spec:
+  podSelector: {matchLabels: {app: database}}
+  policyTypes: [Ingress]
+  ingress: [{}]
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: api, labels: {role: api}}
+spec:
+  containers:
+  - {name: client, image: 'busybox:1.36', command: [sleep, '14400']}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: backup, labels: {role: backup}}
+spec:
+  containers:
+  - {name: client, image: 'busybox:1.36', command: [sleep, '14400']}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: visitor, labels: {role: visitor}}
+spec:
+  containers:
+  - {name: client, image: 'busybox:1.36', command: [sleep, '14400']}
+EOF
+kubectl -n mock4-q16 wait --for=condition=Ready pod/database pod/api pod/backup pod/visitor --timeout=120s'''
+]
+solution = '''```bash
+kubectl -n mock4-q16 delete networkpolicy allow-public --ignore-not-found
+kubectl -n mock4-q16 apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: database-access}
+spec:
+  podSelector: {matchLabels: {app: database}}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector: {matchLabels: {role: api}}
+    ports: [{protocol: TCP, port: 8080}]
+  - from:
+    - podSelector: {matchLabels: {role: backup}}
+    ports: [{protocol: TCP, port: 9090}]
+EOF
+```'''
+
+[[tasks.checks]]
+name = '''Both approved client-to-port connections succeed'''
+run = '''kubectl -n mock4-q16 get networkpolicy database-access >/dev/null || exit 1
+if kubectl -n mock4-q16 get networkpolicy allow-public >/dev/null 2>&1; then exit 1; fi
+ip=$(kubectl -n mock4-q16 get pod database -o jsonpath='{.status.podIP}') || exit 1
+[ -n "$ip" ] || exit 1
+kubectl -n mock4-q16 exec database -- wget -qO- -T 2 http://127.0.0.1:8080/ | grep -qx database-online || exit 1
+kubectl -n mock4-q16 exec database -- wget -qO- -T 2 http://127.0.0.1:9090/ | grep -qx database-online || exit 1
+for i in $(seq 1 20); do
+[ "$(kubectl -n mock4-q16 exec api -- wget -qO- -T 2 "http://$ip:8080/" 2>/dev/null)" = database-online ] && [ "$(kubectl -n mock4-q16 exec backup -- wget -qO- -T 2 "http://$ip:9090/" 2>/dev/null)" = database-online ] && echo ok && exit 0
+sleep 2; done; exit 1'''
+equals = '''ok'''
+timeout = 180
+
+[[tasks.checks]]
+name = '''Crossed ports and visitors are denied while both listeners remain healthy'''
+run = '''kubectl -n mock4-q16 get networkpolicy database-access >/dev/null || exit 1
+if kubectl -n mock4-q16 get networkpolicy allow-public >/dev/null 2>&1; then exit 1; fi
+ip=$(kubectl -n mock4-q16 get pod database -o jsonpath='{.status.podIP}') || exit 1
+[ -n "$ip" ] || exit 1
+kubectl -n mock4-q16 exec database -- wget -qO- -T 2 http://127.0.0.1:8080/ | grep -qx database-online || exit 1
+kubectl -n mock4-q16 exec database -- wget -qO- -T 2 http://127.0.0.1:9090/ | grep -qx database-online || exit 1
+for p in api backup visitor; do
+[ "$(kubectl -n mock4-q16 get pod "$p" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')" = True ] && kubectl -n mock4-q16 exec "$p" -- true || exit 1
+done
+for i in $(seq 1 15); do
+blocked=true
+for pair in api:9090 backup:8080 visitor:8080 visitor:9090; do
+p=${pair%:*}; port=${pair#*:}
+if kubectl -n mock4-q16 exec "$p" -- wget -qO- -T 2 "http://$ip:$port/" >/dev/null 2>&1; then blocked=false; fi
+done
+[ "$blocked" = true ] && echo ok && exit 0
+sleep 1; done; exit 1'''
+equals = '''ok'''
+timeout = 200
+
+[[tasks.checks]]
+name = '''The intended workload is isolated for ingress only'''
+run = '''kubectl -n mock4-q16 get networkpolicy database-access >/dev/null || exit 1
+if kubectl -n mock4-q16 get networkpolicy allow-public >/dev/null 2>&1; then exit 1; fi
+ip=$(kubectl -n mock4-q16 get pod database -o jsonpath='{.status.podIP}') || exit 1
+[ -n "$ip" ] || exit 1
+kubectl -n mock4-q16 exec database -- wget -qO- -T 2 http://127.0.0.1:8080/ | grep -qx database-online || exit 1
+kubectl -n mock4-q16 exec database -- wget -qO- -T 2 http://127.0.0.1:9090/ | grep -qx database-online || exit 1
+test "$(kubectl -n mock4-q16 get networkpolicy database-access -o jsonpath='{.spec.podSelector.matchLabels.app}|{.spec.policyTypes[*]}')" = 'database|Ingress' && echo ok'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.negatives]]
+name = '''The new restrictive policy is added without removing the permissive policy'''
+run = '''kubectl -n mock4-q16 apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: database-access}
+spec:
+  podSelector: {matchLabels: {app: database}}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector: {matchLabels: {role: api}}
+    ports: [{protocol: TCP, port: 8080}]
+  - from:
+    - podSelector: {matchLabels: {role: backup}}
+    ports: [{protocol: TCP, port: 9090}]
+EOF'''
+undo = '''kubectl -n mock4-q16 delete networkpolicy database-access --ignore-not-found
+kubectl -n mock4-q16 apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-public}
+spec:
+  podSelector: {matchLabels: {app: database}}
+  policyTypes: [Ingress]
+  ingress: [{}]
+EOF'''
+
+[[tasks.negatives]]
+name = '''All ingress is denied, including approved API and backup clients'''
+run = '''kubectl -n mock4-q16 delete networkpolicy allow-public --ignore-not-found
+kubectl -n mock4-q16 apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: database-access}
+spec:
+  podSelector: {matchLabels: {app: database}}
+  policyTypes: [Ingress]
+  ingress:
+    []
+EOF'''
+undo = '''kubectl -n mock4-q16 delete networkpolicy database-access --ignore-not-found
+kubectl -n mock4-q16 apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-public}
+spec:
+  podSelector: {matchLabels: {app: database}}
+  policyTypes: [Ingress]
+  ingress: [{}]
+EOF'''
+
+[[tasks.negatives]]
+name = '''Client selectors are right but port restrictions are omitted'''
+run = '''kubectl -n mock4-q16 delete networkpolicy allow-public --ignore-not-found
+kubectl -n mock4-q16 apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: database-access}
+spec:
+  podSelector: {matchLabels: {app: database}}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector: {matchLabels: {role: api}}
+  - from:
+    - podSelector: {matchLabels: {role: backup}}
+EOF'''
+undo = '''kubectl -n mock4-q16 delete networkpolicy database-access --ignore-not-found
+kubectl -n mock4-q16 apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-public}
+spec:
+  podSelector: {matchLabels: {app: database}}
+  policyTypes: [Ingress]
+  ingress: [{}]
+EOF'''
+
+[[tasks.alternatives]]
+name = '''Equivalent set-based role selectors'''
+run = '''kubectl -n mock4-q16 delete networkpolicy allow-public --ignore-not-found
+kubectl -n mock4-q16 apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: database-access}
+spec:
+  podSelector: {matchLabels: {app: database}}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector: {matchExpressions: [{key: role, operator: In, values: [api]}]}
+    ports: [{protocol: TCP, port: 8080}]
+  - from:
+    - podSelector: {matchExpressions: [{key: role, operator: In, values: [backup]}]}
+    ports: [{protocol: TCP, port: 9090}]
+EOF'''
+undo = '''kubectl -n mock4-q16 delete networkpolicy database-access --ignore-not-found
+kubectl -n mock4-q16 apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-public}
+spec:
+  podSelector: {matchLabels: {app: database}}
+  policyTypes: [Ingress]
+  ingress: [{}]
+EOF'''
+
+[[tasks]]
+id = "q17"
+domain = "networking"
+weight = 4
+title = "Restore a DNS alias behind egress isolation"
+namespace = "mock4-q17"
+task = '''Service `catalog-alias` in `mock4-q17` has a misspelled ExternalName target. Pod `resolver` also has a broken egress policy: DNS uses the wrong port and application access allows too many source-namespace Pods. Repair the alias to `catalog.mock4-q17-source.svc.cluster.local`, keeping it DNS-only (no selector, clusterIP or proxy). Repair NetworkPolicy `resolver-egress`, selecting app=resolver and isolating Egress only: permit UDP/TCP 53 to kube-system Pods labelled k8s-app=kube-dns; permit TCP 8080 only to app=catalog Pods in mock4-q17-source. Deny access to source Pod `decoy` on 8080 and catalog on 9090; both listeners really exist. Preserve all Pods, labels and source Services. From resolver, capture successful nslookup output for catalog-alias.mock4-q17.svc.cluster.local in `$PODDOJO_LAB_DIR/m4-catalog-dns.txt` and HTTP response from http://catalog-alias:8080/ in `$PODDOJO_LAB_DIR/m4-catalog-response.txt`. Expect catalog-primary. ExternalName does not proxy traffic or translate ports.'''
+setup = [
+'''kubectl -n mock4-q17-source run catalog --image=busybox:1.36 --restart=Never --labels=app=catalog --dry-run=client -o yaml --command -- sh -c 'mkdir -p /www; echo catalog-primary > /www/index.html; httpd -p 9090 -h /www; exec httpd -f -p 8080 -h /www' | kubectl apply -f -
+kubectl -n mock4-q17-source expose pod catalog --port=8080 --target-port=8080 --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n mock4-q17 run resolver --labels=app=resolver --image=python:3.12-alpine --restart=Never --dry-run=client -o yaml --command -- sleep 14400 | kubectl apply -f -
+kubectl -n mock4-q17 wait --for=condition=Ready pod/resolver --timeout=120s
+kubectl -n mock4-q17-source wait --for=condition=Ready pod/catalog --timeout=120s
+kubectl -n mock4-q17 apply -f - <<'EOF'
+apiVersion: v1
+kind: Service
+metadata: {name: catalog-alias}
+spec:
+  type: ExternalName
+  externalName: catalog.misspelled.svc.cluster.local
+EOF
+kubectl -n mock4-q17-source run decoy --image=busybox:1.36 --restart=Never --labels=app=decoy --dry-run=client -o yaml --command -- sh -c 'mkdir -p /www; echo not-catalog > /www/index.html; exec httpd -f -p 8080 -h /www' | kubectl apply -f -
+kubectl -n mock4-q17-source wait --for=condition=Ready pod/decoy --timeout=120s
+kubectl -n mock4-q17-source get pods catalog decoy -o jsonpath='{range .items[*]}{.metadata.uid}{"\n"}{end}' > "$PODDOJO_LAB_DIR/m4-catalog-uid.txt"
+kubectl apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: resolver-egress, namespace: mock4-q17}
+spec:
+  podSelector: {matchLabels: {app: resolver}}
+  policyTypes: [Egress]
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: mock4-q17-source}
+    ports: [{protocol: TCP, port: 8080}]
+  - to:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: kube-system}
+      podSelector: {matchLabels: {k8s-app: kube-dns}}
+    ports: [{protocol: UDP, port: 5353}, {protocol: TCP, port: 5353}]
+EOF'''
+]
+solution = '''```bash
+kubectl apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: resolver-egress, namespace: mock4-q17}
+spec:
+  podSelector: {matchLabels: {app: resolver}}
+  policyTypes: [Egress]
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: mock4-q17-source}
+      podSelector: {matchLabels: {app: catalog}}
+    ports: [{protocol: TCP, port: 8080}]
+  - to:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: kube-system}
+      podSelector: {matchLabels: {k8s-app: kube-dns}}
+    ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+EOF
+kubectl -n mock4-q17 patch service catalog-alias --type=merge -p '{"spec":{"externalName":"catalog.mock4-q17-source.svc.cluster.local"}}'
+for i in $(seq 1 30); do
+kubectl -n mock4-q17 exec resolver -- nslookup catalog-alias.mock4-q17.svc.cluster.local > "$PODDOJO_LAB_DIR/m4-catalog-dns.txt" && kubectl -n mock4-q17 exec resolver -- wget -qO- -T 2 http://catalog-alias:8080/ > "$PODDOJO_LAB_DIR/m4-catalog-response.txt" && break
+sleep 2; done
+test "$(cat "$PODDOJO_LAB_DIR/m4-catalog-response.txt")" = catalog-primary
+```'''
+
+[[tasks.checks]]
+name = '''The alias remains DNS-only and points at the right namespace'''
+run = '''v=$(kubectl -n mock4-q17 get service catalog-alias -o jsonpath='{.spec.type}|{.spec.externalName}|{.spec.selector}|{.spec.clusterIP}') || exit 1
+case "$v" in 'ExternalName|catalog.mock4-q17-source.svc.cluster.local||'|'ExternalName|catalog.mock4-q17-source.svc.cluster.local.||') echo ok;; *) exit 1;; esac'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''Resolution, live traffic and submitted evidence agree'''
+run = '''for i in $(seq 1 30); do
+[ "$(kubectl -n mock4-q17 exec resolver -- wget -qO- -T 2 http://catalog-alias:8080/ 2>/dev/null)" = catalog-primary ] && [ "$(cat "$PODDOJO_LAB_DIR/m4-catalog-response.txt")" = catalog-primary ] && grep -F 'catalog.mock4-q17-source.svc.cluster.local' "$PODDOJO_LAB_DIR/m4-catalog-dns.txt" >/dev/null && echo ok && exit 0
+sleep 2; done; exit 1'''
+equals = '''ok'''
+timeout = 90
+
+[[tasks.checks]]
+name = '''Unapproved egress is blocked while source resources remain healthy'''
+run = '''[ "$(kubectl -n mock4-q17 get networkpolicy resolver-egress -o jsonpath='{.spec.podSelector.matchLabels.app}|{.spec.policyTypes[*]}')" = 'resolver|Egress' ] || exit 1
+[ "$(kubectl -n mock4-q17-source get pods catalog decoy -o jsonpath='{range .items[*]}{.metadata.uid}{"\n"}{end}')" = "$(cat "$PODDOJO_LAB_DIR/m4-catalog-uid.txt")" ] || exit 1
+kubectl -n mock4-q17 exec resolver -- true || exit 1
+[ "$(kubectl -n mock4-q17-source exec catalog -- wget -qO- -T 2 http://127.0.0.1:9090/)" = catalog-primary ] || exit 1
+[ "$(kubectl -n mock4-q17-source exec decoy -- wget -qO- -T 2 http://127.0.0.1:8080/)" = not-catalog ] || exit 1
+catalog=$(kubectl -n mock4-q17-source get pod catalog -o jsonpath='{.status.podIP}') || exit 1
+decoy=$(kubectl -n mock4-q17-source get pod decoy -o jsonpath='{.status.podIP}') || exit 1
+[ -n "$catalog" ] && [ -n "$decoy" ] || exit 1
+for i in $(seq 1 15); do
+if kubectl -n mock4-q17 exec resolver -- wget -qO- -T 2 "http://$catalog:9090/" >/dev/null 2>&1; then sleep 1; continue; fi
+if kubectl -n mock4-q17 exec resolver -- wget -qO- -T 2 "http://$decoy:8080/" >/dev/null 2>&1; then sleep 1; continue; fi
+echo ok; exit 0
+done; exit 1'''
+equals = '''ok'''
+timeout = 180
+
+[[tasks.checks]]
+name = '''The actual client resolves the catalog over both UDP and TCP DNS'''
+run = '''for i in $(seq 1 5); do
+v=$(kubectl -n mock4-q17 exec resolver -- python -c 'import socket,struct
+with open("/etc/resolv.conf") as f:
+    dns=next(line.split()[1] for line in f if line.startswith("nameserver "))
+name="catalog.mock4-q17-source.svc.cluster.local"
+question=b"".join(bytes([len(p)])+p.encode() for p in name.split("."))+b"\0"+struct.pack("!HH",1,1)
+query=struct.pack("!HHHHHH",1200,256,1,0,0,0)+question
+family=socket.AF_INET6 if ":" in dns else socket.AF_INET
+with socket.socket(family,socket.SOCK_DGRAM) as s:
+    s.settimeout(3); s.sendto(query,(dns,53)); answer=s.recv(65535)
+    assert len(answer)>=12 and struct.unpack("!H",answer[:2])[0]==1200 and answer[3]&15==0 and struct.unpack("!H",answer[6:8])[0]>0
+with socket.create_connection((dns,53),3) as s:
+    s.sendall(struct.pack("!H",len(query))+query)
+    with s.makefile("rb") as f:
+        length=f.read(2); assert len(length)==2
+        answer=f.read(struct.unpack("!H",length)[0])
+        assert len(answer)>=12 and struct.unpack("!H",answer[:2])[0]==1200 and answer[3]&15==0 and struct.unpack("!H",answer[6:8])[0]>0
+print("ok")' 2>/dev/null) && [ "$v" = ok ] && echo ok && exit 0
+sleep 2; done; exit 1'''
+equals = '''ok'''
+timeout = 60
+
+[[tasks.negatives]]
+name = '''DNS works but an overly broad namespace peer still permits the decoy'''
+run = '''kubectl apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: resolver-egress, namespace: mock4-q17}
+spec:
+  podSelector: {matchLabels: {app: resolver}}
+  policyTypes: [Egress]
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: mock4-q17-source}
+    ports: [{protocol: TCP, port: 8080}]
+  - to:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: kube-system}
+      podSelector: {matchLabels: {k8s-app: kube-dns}}
+    ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+EOF
+kubectl -n mock4-q17 patch service catalog-alias --type=merge -p '{"spec":{"externalName":"catalog.mock4-q17-source.svc.cluster.local"}}'
+for i in $(seq 1 30); do
+kubectl -n mock4-q17 exec resolver -- nslookup catalog-alias.mock4-q17.svc.cluster.local > "$PODDOJO_LAB_DIR/m4-catalog-dns.txt" && kubectl -n mock4-q17 exec resolver -- wget -qO- -T 2 http://catalog-alias:8080/ > "$PODDOJO_LAB_DIR/m4-catalog-response.txt" && break
+sleep 2; done
+test "$(cat "$PODDOJO_LAB_DIR/m4-catalog-response.txt")" = catalog-primary'''
+undo = '''kubectl -n mock4-q17 patch service catalog-alias --type=merge -p '{"spec":{"externalName":"catalog.misspelled.svc.cluster.local"}}'
+rm -f "$PODDOJO_LAB_DIR/m4-catalog-dns.txt" "$PODDOJO_LAB_DIR/m4-catalog-response.txt"
+kubectl apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: resolver-egress, namespace: mock4-q17}
+spec:
+  podSelector: {matchLabels: {app: resolver}}
+  policyTypes: [Egress]
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: mock4-q17-source}
+    ports: [{protocol: TCP, port: 8080}]
+  - to:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: kube-system}
+      podSelector: {matchLabels: {k8s-app: kube-dns}}
+    ports: [{protocol: UDP, port: 5353}, {protocol: TCP, port: 5353}]
+EOF'''
+
+[[tasks.negatives]]
+name = '''UDP DNS works but TCP DNS is still sent to the wrong port'''
+run = '''kubectl apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: resolver-egress, namespace: mock4-q17}
+spec:
+  podSelector: {matchLabels: {app: resolver}}
+  policyTypes: [Egress]
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: mock4-q17-source}
+      podSelector: {matchLabels: {app: catalog}}
+    ports: [{protocol: TCP, port: 8080}]
+  - to:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: kube-system}
+      podSelector: {matchLabels: {k8s-app: kube-dns}}
+    ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 5353}]
+EOF
+kubectl -n mock4-q17 patch service catalog-alias --type=merge -p '{"spec":{"externalName":"catalog.mock4-q17-source.svc.cluster.local"}}'
+for i in $(seq 1 30); do
+kubectl -n mock4-q17 exec resolver -- nslookup catalog-alias.mock4-q17.svc.cluster.local > "$PODDOJO_LAB_DIR/m4-catalog-dns.txt" && kubectl -n mock4-q17 exec resolver -- wget -qO- -T 2 http://catalog-alias:8080/ > "$PODDOJO_LAB_DIR/m4-catalog-response.txt" && break
+sleep 2; done
+test "$(cat "$PODDOJO_LAB_DIR/m4-catalog-response.txt")" = catalog-primary'''
+undo = '''kubectl -n mock4-q17 patch service catalog-alias --type=merge -p '{"spec":{"externalName":"catalog.misspelled.svc.cluster.local"}}'
+rm -f "$PODDOJO_LAB_DIR/m4-catalog-dns.txt" "$PODDOJO_LAB_DIR/m4-catalog-response.txt"
+kubectl apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: resolver-egress, namespace: mock4-q17}
+spec:
+  podSelector: {matchLabels: {app: resolver}}
+  policyTypes: [Egress]
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: mock4-q17-source}
+    ports: [{protocol: TCP, port: 8080}]
+  - to:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: kube-system}
+      podSelector: {matchLabels: {k8s-app: kube-dns}}
+    ports: [{protocol: UDP, port: 5353}, {protocol: TCP, port: 5353}]
+EOF'''
+
+[[tasks.alternatives]]
+name = '''Absolute DNS name and equivalent set-based application selector'''
+run = '''kubectl apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: resolver-egress, namespace: mock4-q17}
+spec:
+  podSelector: {matchLabels: {app: resolver}}
+  policyTypes: [Egress]
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: mock4-q17-source}
+      podSelector: {matchExpressions: [{key: app, operator: In, values: [catalog]}]}
+    ports: [{protocol: TCP, port: 8080}]
+  - to:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: kube-system}
+      podSelector: {matchLabels: {k8s-app: kube-dns}}
+    ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+EOF
+kubectl -n mock4-q17 patch service catalog-alias --type=merge -p '{"spec":{"externalName":"catalog.mock4-q17-source.svc.cluster.local."}}'
+for i in $(seq 1 30); do
+kubectl -n mock4-q17 exec resolver -- nslookup catalog-alias.mock4-q17.svc.cluster.local > "$PODDOJO_LAB_DIR/m4-catalog-dns.txt" && kubectl -n mock4-q17 exec resolver -- wget -qO- -T 2 http://catalog-alias:8080/ > "$PODDOJO_LAB_DIR/m4-catalog-response.txt" && break
+sleep 2; done
+test "$(cat "$PODDOJO_LAB_DIR/m4-catalog-response.txt")" = catalog-primary'''
+undo = '''kubectl -n mock4-q17 patch service catalog-alias --type=merge -p '{"spec":{"externalName":"catalog.misspelled.svc.cluster.local"}}'
+rm -f "$PODDOJO_LAB_DIR/m4-catalog-dns.txt" "$PODDOJO_LAB_DIR/m4-catalog-response.txt"
+kubectl apply -f - <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: resolver-egress, namespace: mock4-q17}
+spec:
+  podSelector: {matchLabels: {app: resolver}}
+  policyTypes: [Egress]
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: mock4-q17-source}
+    ports: [{protocol: TCP, port: 8080}]
+  - to:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: kube-system}
+      podSelector: {matchLabels: {k8s-app: kube-dns}}
+    ports: [{protocol: UDP, port: 5353}, {protocol: TCP, port: 5353}]
+EOF'''
