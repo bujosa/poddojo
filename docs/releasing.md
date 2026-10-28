@@ -43,6 +43,13 @@ Without a Developer ID the release notes must say how to open the app the first 
 
 ## Linux
 
-PodDojo builds and its tests pass on Linux (checked in a `rust` container, see the pull request
-that added this note). Build it with `cargo build --release -p poddojo -p dojo`; the app needs an
+PodDojo builds and its tests pass on Linux: for v0.3.0, `cargo test --workspace`, a release build and
+`dojo validate content` were run in a `rust:1.99.1-bookworm` container (aarch64), with a copy of the
+repository:
+
+```bash
+docker run --rm -v "$PWD":/src:ro rust:1.99.1-bookworm sh -c 'mkdir /w && cd /src && tar --exclude=./target --exclude=./.git -cf - . | tar -xf - -C /w && cd /w && cargo test --workspace -q && cargo build --release -p poddojo -p dojo'
+```
+
+Build it with `cargo build --release -p poddojo -p dojo`; the app needs an
 X11 or Wayland session with OpenGL.

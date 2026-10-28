@@ -33,11 +33,11 @@
     </td>
     <td width="25%" valign="top">
       <h3>🧪 Labs that grade themselves</h3>
-      155 lab steps across 39 lessons. Press <b>Check</b> and PodDojo inspects the real containers and Kubernetes objects you created.
+      159 lab steps across 40 lessons. Press <b>Check</b> and PodDojo inspects the real containers and Kubernetes objects you created.
     </td>
     <td width="25%" valign="top">
       <h3>⏱ Real exam practice</h3>
-      Three timed, performance-based CKAD mock exams (51 tasks) with partial credit and a score per curriculum domain.
+      Four timed, performance-based CKAD mock exams (68 tasks) with partial credit, a score per domain, and missed tasks coming back as timed drills.
     </td>
     <td width="25%" valign="top">
       <h3>⚡ Ultralight</h3>
@@ -50,14 +50,20 @@
 
 | Track | What you learn | Lessons |
 |---|---|---|
-| **Docker Foundations** | containers as processes, the engine and contexts, run/inspect/debug, images and layers, Dockerfiles, multi-stage builds, registries and digests, volumes, networks, Compose, limits and hardening | 13 |
+| **Docker Foundations** | the terminal, YAML and vim from zero, containers as processes, the engine and contexts, run/inspect/debug, images and layers, Dockerfiles, multi-stage builds, registries and digests, volumes, networks, Compose, limits and hardening | 14 |
 | **CKAD** (curriculum v1.37) | the lab cluster and kubectl at exam speed, Pods, workloads, Jobs/CronJobs, multi-container Pods, volumes, rolling updates, blue/green and canary, Helm, Kustomize, probes, logs, debugging, API deprecations, ConfigMaps, Secrets, resources and quotas, ServiceAccounts and RBAC, SecurityContexts, CRDs and Operators, Services, Ingress, NetworkPolicies, exam strategy | 26 |
-| **Mock exams** | 16–18 tasks each, 2 hours, 66% to pass, weighted 20/20/15/25/20 like the real exam | 3 |
+| **Mock exams** | 16–18 tasks each, 2 hours, 66% to pass, weighted 20/20/15/25/20 like the real exam; mock 4 is exam-day hard | 4 |
+| **Reference** | kubectl at speed, annotated Pod YAML, workloads, config and secrets, networking, observability, packaging, API deprecations: the in-app counterpart of the docs allowed in the exam (⌘K opens it beside your work) | 8 pages |
 
 Every lesson has **Concepts** (with ▶ Run buttons on every shell snippet), a **Quiz** that explains
 each answer, and a **Lab** with hints and worked solutions. A lesson is complete when you have read
-it, passed the quiz (70%) and passed every lab step. Your **CKAD readiness** combines lessons done and
-mock-exam scores, weighted like the exam.
+it, passed the quiz (70%) and passed every lab step.
+
+**Review** brings back what you miss: every quiz answer and mock-exam task joins a spaced-repetition
+deck (1, 3, 7, 16, 35 days; misses return the same day), and tasks you did not solve in a mock come
+back as timed drills, set up fresh on the cluster. **Would you pass today?** is an honest verdict
+built from your fresh first attempts of each mock (retakes measure memory, so they do not count),
+curriculum coverage and weak domains, and it says what to do next.
 
 <p align="center">
   <img src="docs/images/lab.png" alt="The lab workspace: the lab's steps on the left with the current step highlighted, a terminal on the right running kubectl against the lab cluster" width="100%">
@@ -102,7 +108,7 @@ Or install it as a regular macOS app (Dock, Spotlight, its own icon):
 cargo xtask bundle --install
 ```
 
-Shortcuts: <kbd>⌘1</kbd>–<kbd>⌘7</kbd> pages, <kbd>⌘J</kbd> terminal, <kbd>⌘T</kbd> a real terminal window with the lab environment.
+Shortcuts: <kbd>⌘1</kbd>–<kbd>⌘9</kbd> pages, <kbd>⌘K</kbd> reference window, <kbd>⌘J</kbd> terminal, <kbd>⌘T</kbd> a real terminal window with the lab environment.
 
 1. **Who's training?** Pick your profile (or create one) on the welcome screen, or try things in
    **guest mode** without saving. Each profile keeps its own progress, quiz scores, exam history and
