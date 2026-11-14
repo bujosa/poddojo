@@ -76,7 +76,26 @@ const INFO_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 "#;
 
 fn bundle(install: bool) -> Result<(), String> {
-    step("build", "cargo", &["build", "--release", "-p", "poddojo", "-p", "dojo"])?;
+    // Release binaries must not carry the builder's home folder (crate paths in panic locations).
+    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+    eprintln!("── build");
+    let built = Command::new("cargo")
+        .args(["build", "--release", "-p", "poddojo", "-p", "dojo"])
+        .env("RUSTFLAGS", format!("--remap-path-prefix={home}=~"))
+        .status()
+        .map_err(|e| format!("build: {e}"))?;
+    if !built.success() {
+        return Err("build failed".into());
+    }
+    for bin in ["poddojo", "dojo"] {
+        let leaks = Command::new("grep")
+            .args(["-c", &home, &format!("target/release/{bin}")])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if String::from_utf8_lossy(&leaks.stdout).trim() != "0" {
+            return Err(format!("target/release/{bin} still contains {home}"));
+        }
+    }
     let app = std::path::Path::new("target/bundle/PodDojo.app");
     let contents = app.join("Contents");
     let _ = std::fs::remove_dir_all(app);
