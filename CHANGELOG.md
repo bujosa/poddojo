@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2
+
+- The app icon follows Apple's grid (the artwork inside the standard margin, with a soft shadow),
+  so PodDojo sits at the same size as every other app in the Dock and in Keiko.
+
 ## 0.3.1
 
 - Release binaries no longer contain the builder's home folder (crate paths in panic locations);
