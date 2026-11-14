@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- Release binaries no longer contain the builder's home folder (crate paths in panic locations);
+  `cargo xtask bundle` fails if they do.
+- Installable from **Keiko**, the launcher for the dojo apps.
+
 ## 0.3.0
 
 - **Review**: every quiz answer and mock-exam task joins a spaced-repetition deck (1, 3, 7, 16, 35
