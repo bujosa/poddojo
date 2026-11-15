@@ -159,6 +159,10 @@ verified end to end on a real cluster with `dojo verify`.
 cargo xtask ci     # fmt, clippy -D warnings, tests, content validation
 ```
 
+## Contributing
+
+Start with [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, contribution paths, validation and pull requests. Bug reports, teaching improvements and focused code changes are welcome.
+
 ## License
 
 Code and original assets: MIT OR Apache-2.0. Docker, Kubernetes and CKAD are trademarks of their
